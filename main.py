@@ -1,12 +1,13 @@
 import pandas as pd
 import streamlit as st
 from io import BytesIO
+from datetime import datetime
 import openpyxl
 
-# V13.8.4 雲端穩定版 - 確保變數完全定義
+# V13.8.6 雲端藍調標頭修正版
 st.set_page_config(page_title="化石先生(JoJo)：雲端工時分析系統", layout="wide")
 
-def process_data_v13_8_4(file):
+def process_data_v13_8_6(file):
     try:
         file.seek(0)
         all_sheets = pd.read_excel(file, sheet_name=None, header=None)
@@ -59,35 +60,73 @@ def process_data_v13_8_4(file):
         return month_data_dict
     except: return None
 
+# --- UI 介面 ---
 st.title("🛡️ 化石先生(JoJo)：雲端工時分析系統")
-st.info("任務簡報：環境已切換至 Python 3.12 穩定模式。")
+st.info("系統校準完畢：標頭已鎖定為粗體藍字，並優化了全域框線渲染邏輯。")
 
 uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
 if uploaded_file:
-    if st.button("🚀 啟動分析任務"):
-        month_dict = process_data_v13_8_4(uploaded_file)
+    if st.button("🚀 啟動衛星連線分析"):
+        month_dict = process_data_v13_8_6(uploaded_file)
         if month_dict:
-            st.success("數據掃描完成。")
+            st.success("數據掃描與藍調標頭渲染完成。")
             output_excel = BytesIO()
             with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
                 wb = writer.book
+                
+                # 1. 定位標頭格式
+                header_fmt = wb.add_format({
+                    'bold': True,
+                    'font_color': 'blue',
+                    'border': 1,
+                    'align': 'center',
+                    'valign': 'vcenter'
+                })
+                
                 for month, data in month_dict.items():
                     safe_m = str(month)[:25]
                     summary = data.groupby('人員').agg({'當日工時':'sum', '正常(8h)':'sum', '加班':'sum', '月總工時':'max'}).reset_index()
-                    data.to_excel(writer, index=False, sheet_name=f"{safe_m}_明細")
-                    summary.to_excel(writer, index=False, sheet_name=f"{safe_m}_摘要")
                     
-                    ws = writer.sheets[f"{safe_m}_明細"]
+                    # --- 寫入明細頁 ---
+                    sheet_detail = f"{safe_m}_明細"
+                    data.to_excel(writer, index=False, sheet_name=sheet_detail)
+                    ws_d = writer.sheets[sheet_detail]
+                    
+                    # 強制重新寫入標頭以確保藍色粗體
+                    for c_idx, col_val in enumerate(data.columns):
+                        ws_d.write(0, c_idx, col_val, header_fmt)
+                    
+                    # 設定內容格式
+                    unique_p = data['人員'].unique()
                     colors = ['#F0F2F6', '#E1F5FE', '#E8F5E9', '#FFFDE7', '#F3E5F5', '#EFEBE9']
-                    p_map = {p: colors[i%6] for i, p in enumerate(data['人員'].unique())}
+                    p_map = {p: colors[i%len(colors)] for i, p in enumerate(unique_p)}
                     
                     for r_idx in range(len(data)):
                         p_bg = p_map.get(data.iloc[r_idx]['人員'])
                         std_f = wb.add_format({'bg_color': p_bg, 'border': 1, 'num_format': '0.0'})
                         red_f = wb.add_format({'bg_color': p_bg, 'border': 1, 'num_format': '0.0', 'font_color': 'red', 'bold': True})
-                        for c_idx, col in enumerate(data.columns):
-                            is_red = (col == '星期' and data.iloc[r_idx][col] in ['週六', '週日'])
-                            ws.write(r_idx + 1, c_idx, data.iloc[r_idx][col], red_f if is_red else std_f)
-                    ws.set_column('A:L', 15)
-            st.download_button("📥 下載整合報告", output_excel.getvalue(), "化石先生報告.xlsx")
+                        
+                        for c_idx, col_name in enumerate(data.columns):
+                            val = data.iloc[r_idx][col_name]
+                            is_wk = (col_name == '星期' and val in ['週六', '週日'])
+                            ws_d.write(r_idx + 1, c_idx, val, red_f if is_wk else std_f)
+                    ws_d.set_column('A:L', 15)
+                    
+                    # --- 寫入摘要頁 ---
+                    sheet_sum = f"{safe_m}_摘要"
+                    summary.to_excel(writer, index=False, sheet_name=sheet_sum)
+                    ws_s = writer.sheets[sheet_sum]
+                    
+                    # 摘要頁標頭藍化
+                    for c_idx, col_val in enumerate(summary.columns):
+                        ws_s.write(0, c_idx, col_val, header_fmt)
+                    
+                    # 摘要頁內容框線
+                    sum_f = wb.add_format({'border': 1, 'num_format': '0.0'})
+                    for r_idx in range(len(summary)):
+                        for c_idx in range(len(summary.columns)):
+                            ws_s.write(r_idx + 1, c_idx, summary.iloc[r_idx, c_idx], sum_f)
+                    ws_s.set_column('A:E', 15)
+
+            st.download_button("📥 下載藍調標頭報告", output_excel.getvalue(), "化石先生報告.xlsx")
