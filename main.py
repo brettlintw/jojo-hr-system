@@ -4,8 +4,8 @@ from io import BytesIO
 from datetime import datetime
 import openpyxl
 
-# 雲端版 V13.8
-st.set_page_config(page_title="化石先生(JoJo)：雲端工時系統 V13.8", layout="wide")
+# V13.8.1 雲端穩定版
+st.set_page_config(page_title="化石先生(JoJo)：雲端工時系統", layout="wide")
 
 def get_excel_save_time(file):
     try:
@@ -17,7 +17,7 @@ def get_excel_save_time(file):
         return last_saved.strftime("%Y年%m月%d日 %H:%M:%S") if last_saved else "未知"
     except: return "無法讀取"
 
-def process_data_v13_8(file):
+def process_data_cloud(file):
     try:
         file.seek(0)
         all_sheets = pd.read_excel(file, sheet_name=None, header=None)
@@ -49,9 +49,8 @@ def process_data_v13_8(file):
                             shift = str(rows.iloc[idx, col_idx]).strip()
                             if shift != "nan" or work_h > 0:
                                 dt_obj = pd.to_datetime(target_date)
-                                week_cn = f"週{['一','二','三','四','五','六','日'][dt_obj.weekday()]}"
                                 person_records.append({
-                                    '人員': person, '日期': target_date, '星期': week_cn,
+                                    '人員': person, '日期': target_date, '星期': f"週{['一','二','三','四','五','六','日'][dt_obj.weekday()]}",
                                     '班次': shift if shift != "nan" else "",
                                     '上班': str(rows.iloc[idx+1, col_idx]).strip()[:5],
                                     '下班': str(rows.iloc[idx+2, col_idx]).strip()[:5],
@@ -72,15 +71,13 @@ def process_data_v13_8(file):
     except: return None
 
 # --- UI ---
-st.title("🛡️ 化石先生(JoJo)：工時分析系統 (V13.8)")
+st.title("🛡️ 化石先生(JoJo)：雲端工時分析系統")
 st.markdown("---")
 uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
 if uploaded_file:
-    st.write(f"💾 **存檔時間：{get_excel_save_time(uploaded_file)}**")
     if st.button("🚀 啟動衛星連線分析"):
-        uploaded_file.seek(0)
-        month_dict = process_data_v13_8(uploaded_file)
+        month_dict = process_data_cloud(uploaded_file)
         if month_dict:
             st.success("分析完成")
             output_excel = BytesIO()
