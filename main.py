@@ -3,10 +3,10 @@ import streamlit as st
 from io import BytesIO
 import openpyxl
 
-# V13.8.3 雲端穩定版
+# V13.8.4 雲端穩定版 - 確保變數完全定義
 st.set_page_config(page_title="化石先生(JoJo)：雲端工時分析系統", layout="wide")
 
-def process_data_v13_8_3(file):
+def process_data_v13_8_4(file):
     try:
         file.seek(0)
         all_sheets = pd.read_excel(file, sheet_name=None, header=None)
@@ -59,15 +59,14 @@ def process_data_v13_8_3(file):
         return month_data_dict
     except: return None
 
-# --- UI 介面 ---
 st.title("🛡️ 化石先生(JoJo)：雲端工時分析系統")
-st.info("系統目前已連結至衛星連線，準備進行任務簡報。")
+st.info("任務簡報：環境已切換至 Python 3.12 穩定模式。")
 
 uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
 if uploaded_file:
     if st.button("🚀 啟動分析任務"):
-        month_dict = process_data_v13_8_3(uploaded_file)
+        month_dict = process_data_v13_8_4(uploaded_file)
         if month_dict:
             st.success("數據掃描完成。")
             output_excel = BytesIO()
@@ -85,10 +84,10 @@ if uploaded_file:
                     
                     for r_idx in range(len(data)):
                         p_bg = p_map.get(data.iloc[r_idx]['人員'])
-                        fmt = wb.add_format({'bg_color': p_bg, 'border': 1, 'num_format': '0.0'})
-                        red_fmt = wb.add_format({'bg_color': p_bg, 'border': 1, 'num_format': '0.0', 'font_color': 'red', 'bold': True})
+                        std_f = wb.add_format({'bg_color': p_bg, 'border': 1, 'num_format': '0.0'})
+                        red_f = wb.add_format({'bg_color': p_bg, 'border': 1, 'num_format': '0.0', 'font_color': 'red', 'bold': True})
                         for c_idx, col in enumerate(data.columns):
                             is_red = (col == '星期' and data.iloc[r_idx][col] in ['週六', '週日'])
                             ws.write(r_idx + 1, c_idx, data.iloc[r_idx][col], red_f if is_red else std_f)
                     ws.set_column('A:L', 15)
-            st.download_button("📥 下載整合報告 (Excel)", output_excel.getvalue(), "化石先生報告.xlsx")
+            st.download_button("📥 下載整合報告", output_excel.getvalue(), "化石先生報告.xlsx")
