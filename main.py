@@ -3,10 +3,10 @@ import streamlit as st
 from io import BytesIO
 import openpyxl
 
-# 化石先生(JoJo) 雲端穩定版
-st.set_page_config(page_title="化石先生(JoJo)：工時分析系統", layout="wide")
+# V13.8.3 雲端穩定版
+st.set_page_config(page_title="化石先生(JoJo)：雲端工時分析系統", layout="wide")
 
-def process_data(file):
+def process_data_v13_8_3(file):
     try:
         file.seek(0)
         all_sheets = pd.read_excel(file, sheet_name=None, header=None)
@@ -14,7 +14,8 @@ def process_data(file):
         for sheet_name, df in all_sheets.items():
             header_idx = -1
             for i, row in df.iterrows():
-                if '人員' in str(row.values) and '日期' in str(row.values):
+                row_str = "".join(str(v) for v in row.values)
+                if '人員' in row_str and '日期' in row_str:
                     header_idx = i
                     break
             if header_idx == -1: continue
@@ -34,11 +35,12 @@ def process_data(file):
                         try:
                             work_v = rows.iloc[idx+3, col_idx]
                             work_h = round(float(work_v), 1) if pd.notnull(work_v) else 0.0
-                            if str(rows.iloc[idx, col_idx]).strip() != "nan" or work_h > 0:
+                            shift = str(rows.iloc[idx, col_idx]).strip()
+                            if shift != "nan" or work_h > 0:
                                 dt_obj = pd.to_datetime(target_date)
                                 person_records.append({
                                     '人員': person, '日期': target_date, '星期': f"週{['一','二','三','四','五','六','日'][dt_obj.weekday()]}",
-                                    '班次': str(rows.iloc[idx, col_idx]).strip(),
+                                    '班次': shift if shift != "nan" else "",
                                     '上班': str(rows.iloc[idx+1, col_idx]).strip()[:5],
                                     '下班': str(rows.iloc[idx+2, col_idx]).strip()[:5],
                                     '當日工時': work_h,
@@ -57,28 +59,36 @@ def process_data(file):
         return month_data_dict
     except: return None
 
-st.title("🛡️ 化石先生(JoJo)：工時分析系統")
+# --- UI 介面 ---
+st.title("🛡️ 化石先生(JoJo)：雲端工時分析系統")
+st.info("系統目前已連結至衛星連線，準備進行任務簡報。")
+
 uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
-if uploaded_file and st.button("🚀 啟動分析"):
-    month_dict = process_data(uploaded_file)
-    if month_dict:
-        st.success("分析完成")
-        output_excel = BytesIO()
-        with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
-            wb = writer.book
-            for month, data in month_dict.items():
-                summary = data.groupby('人員').agg({'當日工時':'sum', '正常(8h)':'sum', '加班':'sum', '月總工時':'max'}).reset_index()
-                data.to_excel(writer, index=False, sheet_name=f"{month}_明細")
-                summary.to_excel(writer, index=False, sheet_name=f"{month}_摘要")
-                ws = writer.sheets[f"{month}_明細"]
-                p_map = {p: ['#F0F2F6', '#E1F5FE', '#E8F5E9', '#FFFDE7', '#F3E5F5', '#EFEBE9'][i%6] for i, p in enumerate(data['人員'].unique())}
-                for r_idx in range(len(data)):
-                    p_bg = p_map.get(data.iloc[r_idx]['人員'])
-                    fmt = wb.add_format({'bg_color': p_bg, 'border': 1, 'num_format': '0.0'})
-                    red_fmt = wb.add_format({'bg_color': p_bg, 'border': 1, 'num_format': '0.0', 'font_color': 'red', 'bold': True})
-                    for c_idx, col in enumerate(data.columns):
-                        is_red = (col == '星期' and data.iloc[r_idx][col] in ['週六', '週日'])
-                        ws.write(r_idx + 1, c_idx, data.iloc[r_idx][col], red_fmt if is_red else fmt)
-                ws.set_column('A:L', 15)
-        st.download_button("📥 下載整合報告", output_excel.getvalue(), "化石先生報告.xlsx")
+if uploaded_file:
+    if st.button("🚀 啟動分析任務"):
+        month_dict = process_data_v13_8_3(uploaded_file)
+        if month_dict:
+            st.success("數據掃描完成。")
+            output_excel = BytesIO()
+            with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
+                wb = writer.book
+                for month, data in month_dict.items():
+                    safe_m = str(month)[:25]
+                    summary = data.groupby('人員').agg({'當日工時':'sum', '正常(8h)':'sum', '加班':'sum', '月總工時':'max'}).reset_index()
+                    data.to_excel(writer, index=False, sheet_name=f"{safe_m}_明細")
+                    summary.to_excel(writer, index=False, sheet_name=f"{safe_m}_摘要")
+                    
+                    ws = writer.sheets[f"{safe_m}_明細"]
+                    colors = ['#F0F2F6', '#E1F5FE', '#E8F5E9', '#FFFDE7', '#F3E5F5', '#EFEBE9']
+                    p_map = {p: colors[i%6] for i, p in enumerate(data['人員'].unique())}
+                    
+                    for r_idx in range(len(data)):
+                        p_bg = p_map.get(data.iloc[r_idx]['人員'])
+                        fmt = wb.add_format({'bg_color': p_bg, 'border': 1, 'num_format': '0.0'})
+                        red_fmt = wb.add_format({'bg_color': p_bg, 'border': 1, 'num_format': '0.0', 'font_color': 'red', 'bold': True})
+                        for c_idx, col in enumerate(data.columns):
+                            is_red = (col == '星期' and data.iloc[r_idx][col] in ['週六', '週日'])
+                            ws.write(r_idx + 1, c_idx, data.iloc[r_idx][col], red_f if is_red else std_f)
+                    ws.set_column('A:L', 15)
+            st.download_button("📥 下載整合報告 (Excel)", output_excel.getvalue(), "化石先生報告.xlsx")
