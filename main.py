@@ -4,10 +4,10 @@ from io import BytesIO
 from datetime import datetime
 import openpyxl
 
-# V13.8.6 雲端藍調標頭修正版
+# V13.8.7 雲端藍調標頭 + 全域靠左版
 st.set_page_config(page_title="化石先生(JoJo)：雲端工時分析系統", layout="wide")
 
-def process_data_v13_8_6(file):
+def process_data_v13_8_7(file):
     try:
         file.seek(0)
         all_sheets = pd.read_excel(file, sheet_name=None, header=None)
@@ -62,25 +62,25 @@ def process_data_v13_8_6(file):
 
 # --- UI 介面 ---
 st.title("🛡️ 化石先生(JoJo)：雲端工時分析系統")
-st.info("系統校準完畢：標頭已鎖定為粗體藍字，並優化了全域框線渲染邏輯。")
+st.info("系統校準完畢：標頭藍字鎖定，所有儲存格數據已強制靠左對齊。")
 
 uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
 if uploaded_file:
     if st.button("🚀 啟動衛星連線分析"):
-        month_dict = process_data_v13_8_6(uploaded_file)
+        month_dict = process_data_v13_8_7(uploaded_file)
         if month_dict:
-            st.success("數據掃描與藍調標頭渲染完成。")
+            st.success("數據掃描與靠左渲染完成。")
             output_excel = BytesIO()
             with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
                 wb = writer.book
                 
-                # 1. 定位標頭格式
+                # 1. 定義標頭格式 (粗體、藍字、靠左)
                 header_fmt = wb.add_format({
                     'bold': True,
                     'font_color': 'blue',
                     'border': 1,
-                    'align': 'center',
+                    'align': 'left',
                     'valign': 'vcenter'
                 })
                 
@@ -93,7 +93,7 @@ if uploaded_file:
                     data.to_excel(writer, index=False, sheet_name=sheet_detail)
                     ws_d = writer.sheets[sheet_detail]
                     
-                    # 強制重新寫入標頭以確保藍色粗體
+                    # 強制重新寫入標頭 (靠左藍字)
                     for c_idx, col_val in enumerate(data.columns):
                         ws_d.write(0, c_idx, col_val, header_fmt)
                     
@@ -104,8 +104,10 @@ if uploaded_file:
                     
                     for r_idx in range(len(data)):
                         p_bg = p_map.get(data.iloc[r_idx]['人員'])
-                        std_f = wb.add_format({'bg_color': p_bg, 'border': 1, 'num_format': '0.0'})
-                        red_f = wb.add_format({'bg_color': p_bg, 'border': 1, 'num_format': '0.0', 'font_color': 'red', 'bold': True})
+                        # 內容標準格式 (靠左)
+                        std_f = wb.add_format({'bg_color': p_bg, 'border': 1, 'num_format': '0.0', 'align': 'left'})
+                        # 內容紅字格式 (靠左)
+                        red_f = wb.add_format({'bg_color': p_bg, 'border': 1, 'num_format': '0.0', 'font_color': 'red', 'bold': True, 'align': 'left'})
                         
                         for c_idx, col_name in enumerate(data.columns):
                             val = data.iloc[r_idx][col_name]
@@ -118,15 +120,15 @@ if uploaded_file:
                     summary.to_excel(writer, index=False, sheet_name=sheet_sum)
                     ws_s = writer.sheets[sheet_sum]
                     
-                    # 摘要頁標頭藍化
+                    # 摘要頁標頭 (靠左藍字)
                     for c_idx, col_val in enumerate(summary.columns):
                         ws_s.write(0, c_idx, col_val, header_fmt)
                     
-                    # 摘要頁內容框線
-                    sum_f = wb.add_format({'border': 1, 'num_format': '0.0'})
+                    # 摘要頁內容 (靠左)
+                    sum_f = wb.add_format({'border': 1, 'num_format': '0.0', 'align': 'left'})
                     for r_idx in range(len(summary)):
                         for c_idx in range(len(summary.columns)):
                             ws_s.write(r_idx + 1, c_idx, summary.iloc[r_idx, c_idx], sum_f)
                     ws_s.set_column('A:E', 15)
 
-            st.download_button("📥 下載藍調標頭報告", output_excel.getvalue(), "化石先生報告.xlsx")
+            st.download_button("📥 下載靠左對齊報告", output_excel.getvalue(), "化石先生報告.xlsx")
