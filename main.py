@@ -3,10 +3,10 @@ import streamlit as st
 from io import BytesIO
 import openpyxl
 
-# V14.0.6 雲端最終版：摘要人員雙重多彩(字+底色) + 欄位順序校準 + 全域邏輯同步
+# V14.0.7 雲端最終版：摘要取消「月總工時」 + 全域多彩識別 + 欄位順序優化
 st.set_page_config(page_title="化石先生(JoJo)：雲端工時分析系統", layout="wide")
 
-def process_data_v14_0_6(file):
+def process_data_v14_0_7(file):
     try:
         file.seek(0)
         all_sheets = pd.read_excel(file, sheet_name=None, header=None)
@@ -76,41 +76,39 @@ def process_data_v14_0_6(file):
     except: return None
 
 # --- UI ---
-st.title("🛡️ 化石先生(JoJo)：雲端工時分析系統 (V14.0.6)")
-st.info("系統校準：摘要頁「人員」已同步「多彩文字+多彩底色」，全域視覺強化完成。")
+st.title("🛡️ 化石先生(JoJo)：雲端工時分析系統 (V14.0.7)")
+st.info("系統校準：摘要頁已取消「月總工時」欄位，維持多彩底色識別與欄位順序優化。")
 
 uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
 if uploaded_file and st.button("🚀 啟動衛星連線分析"):
-    month_dict = process_data_v14_0_6(uploaded_file)
+    month_dict = process_data_v14_0_7(uploaded_file)
     if month_dict:
-        st.success("數據掃描與視覺多彩對齊完成。")
+        st.success("數據掃描與欄位精簡完成。")
         output_excel = BytesIO()
         with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
             wb = writer.book
             head_f = wb.add_format({'bold': 1, 'font_color': 'blue', 'border': 1, 'align': 'left', 'valign': 'vcenter'})
             
-            # 定義全域多彩顏色清單 (文字 + 底色)
             p_colors = [
-                {'text': '#0000FF', 'bg': '#E1F5FE'}, # 藍
-                {'text': '#008000', 'bg': '#E8F5E9'}, # 綠
-                {'text': '#800080', 'bg': '#F3E5F5'}, # 紫
-                {'text': '#FF8C00', 'bg': '#FFF3E0'}, # 橘
-                {'text': '#008080', 'bg': '#E0F2F1'}, # 青
-                {'text': '#A52A2A', 'bg': '#EFEBE9'}, # 褐
-                {'text': '#2F4F4F', 'bg': '#ECEFF1'}  # 灰藍
+                {'text': '#0000FF', 'bg': '#E1F5FE'}, {'text': '#008000', 'bg': '#E8F5E9'}, 
+                {'text': '#800080', 'bg': '#F3E5F5'}, {'text': '#FF8C00', 'bg': '#FFF3E0'}, 
+                {'text': '#008080', 'bg': '#E0F2F1'}, {'text': '#A52A2A', 'bg': '#EFEBE9'}, 
+                {'text': '#2F4F4F', 'bg': '#ECEFF1'}
             ]
             
             for month, data in month_dict.items():
                 safe_m = str(month)[:25]
                 
                 # --- A. 摘要數據計算 ---
-                summary = data.groupby('人員').agg({'出勤計算': 'sum', '當日工時': 'sum', '休息時間/用餐': 'sum', '加班': 'sum'}).reset_index()
+                summary = data.groupby('人員').agg({
+                    '出勤計算': 'sum', '當日工時': 'sum', '休息時間/用餐': 'sum', '加班': 'sum'
+                }).reset_index()
                 summary.rename(columns={'出勤計算': '總工作天數', '當日工時': '當月工時'}, inplace=True)
-                summary['月總工時'] = summary['當月工時']
-                summary = summary[['人員', '總工作天數', '當月工時', '休息時間/用餐', '加班', '月總工時']]
                 
-                # 建立多彩顏色映射
+                # 重新排列摘要欄位：移除「月總工時」
+                summary = summary[['人員', '總工作天數', '當月工時', '休息時間/用餐', '加班']]
+                
                 p_unique = data['人員'].unique()
                 p_color_map = {p: p_colors[i % len(p_colors)] for i, p in enumerate(p_unique)}
                 
@@ -125,19 +123,17 @@ if uploaded_file and st.button("🚀 啟動衛星連線分析"):
                     row = display_data.iloc[r_idx]
                     is_off = (str(row['班次']).strip() == "休")
                     c_sets = p_color_map.get(row['人員'])
-                    
                     for c_idx, col_n in enumerate(display_data.columns):
                         fmt_p = {'border': 1, 'num_format': '0.0', 'align': 'left'}
                         if col_n == '人員':
-                            # 人員欄位：多彩文字 + 對應多彩底色填滿
                             fmt_p['font_color'] = c_sets['text']
-                            fmt_p['bg_color'] = c_sets['bg'] # 多彩底色
+                            fmt_p['bg_color'] = c_sets['bg']
                         elif is_off:
-                            fmt_p['bg_color'] = '#FF0000' # 休假紅底
-                            fmt_p['font_color'] = '#000000' # 黑字
+                            fmt_p['bg_color'] = '#FF0000'
+                            fmt_p['font_color'] = '#000000'
                         else:
-                            if col_n == '用餐(填單人)': fmt_p['font_color'] = '#808080' # 灰字
-                            elif col_n == '加班': fmt_p['font_color'] = '#FF0000' # 加班紅字
+                            if col_n == '用餐(填單人)': fmt_p['font_color'] = '#808080'
+                            elif col_n == '加班': fmt_p['font_color'] = '#FF0000'
                             elif col_n == '星期' and row[col_n] in ['週六', '週日']: 
                                 fmt_p['font_color'] = '#FF0000'
                                 fmt_p['bold'] = True
@@ -153,16 +149,14 @@ if uploaded_file and st.button("🚀 啟動衛星連線分析"):
                 for r_idx in range(len(summary)):
                     row_s = summary.iloc[r_idx]
                     c_sets_s = p_color_map.get(row_s['人員'])
-                    
                     for c_idx, col_n in enumerate(summary.columns):
                         sum_fmt = {'border': 1, 'num_format': '0.0', 'align': 'left'}
                         if col_n == '人員':
-                            # 摘要人員欄位：多彩文字 + 對應多彩底色填滿 (與明細一致)
                             sum_fmt['font_color'] = c_sets_s['text']
-                            sum_fmt['bg_color'] = c_sets_s['bg'] # 多彩底色
+                            sum_fmt['bg_color'] = c_sets_s['bg']
                         elif col_n == '加班':
-                            sum_fmt['font_color'] = '#FF0000' # 加班紅字
+                            sum_fmt['font_color'] = '#FF0000'
                         ws_s.write(r_idx + 1, c_idx, row_s[col_n], wb.add_format(sum_fmt))
                 ws_s.set_column('A:F', 15)
 
-        st.download_button("📥 下載 V14.0.6 全域多彩區隔報告", output_excel.getvalue(), "化石先生報告.xlsx")
+        st.download_button("📥 下載 V14.0.7 摘要精簡報告", output_excel.getvalue(), "化石先生報告.xlsx")
