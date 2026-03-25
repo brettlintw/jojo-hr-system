@@ -5,10 +5,10 @@ import openpyxl
 from datetime import datetime
 from PIL import Image
 
-# V14.2.5 雲端品牌校準穩定版：新增「週末加乘標記」+ 人員間粗底線條 + 階梯式休息判定
+# V14.2.6 雲端品牌校準穩定版：摘要加班紅字強化 + 週末加乘標記 + 人員間粗底線條
 st.set_page_config(page_title="化石先生：雲端工時分析系統", layout="wide")
 
-# --- UI 品牌頭部設定 (Logo 與 標題) ---
+# --- UI 品牌頭部設定 ---
 def display_header():
     col_logo, col_title = st.columns([1, 6])
     with col_logo:
@@ -18,12 +18,12 @@ def display_header():
         except Exception:
             st.error("📷 Logo 檔案未讀取到")
     with col_title:
-        st.title("化石先生：雲端工時分析系統 (V14.2.5)")
+        st.title("化石先生：雲端工時分析系統 (V14.2.6)")
     st.markdown("---")
 
 display_header()
 
-def process_data_v14_2_5(file):
+def process_data_v14_2_6(file):
     try:
         file.seek(0)
         all_sheets = pd.read_excel(file, sheet_name=None, header=None)
@@ -66,15 +66,13 @@ def process_data_v14_2_5(file):
                                 
                                 over_h = round(max(work_h - 8.0 - rest_h, 0.0), 1) if work_h > 8.0 else 0.0
                                 actual_h = round(work_h - rest_h, 1)
-                                
                                 is_off = (shift == "休")
                                 start_t = "-" if is_off else str(rows.iloc[idx+1, col_idx]).strip()[:5]
                                 end_t = "-" if is_off else str(rows.iloc[idx+2, col_idx]).strip()[:5]
-
                                 dt_obj = pd.to_datetime(target_date)
                                 weekday_str = f"週{['一','二','三','四','五','六','日'][dt_obj.weekday()]}"
                                 
-                                # --- V14.2.5 新增：週末加乘標註邏輯 ---
+                                # 週末加乘標註
                                 actual_h_str = str(actual_h)
                                 is_weekend = weekday_str in ['週六', '週日']
                                 if is_weekend and not is_off and work_h > 0:
@@ -85,11 +83,10 @@ def process_data_v14_2_5(file):
                                     '班次': shift if shift != "nan" else "",
                                     '上班': start_t, '下班': end_t,
                                     '當日工時': work_h, '休息時間/用餐': rest_h,
-                                    '實際產出工時': actual_h_str, 
-                                    '加班': over_h,
+                                    '實際產出工時': actual_h_str, '加班': over_h,
                                     '備註': str(rows.iloc[idx+5, col_idx]).strip() if pd.notnull(rows.iloc[idx+5, col_idx]) else "",
                                     '出勤計算': 1 if (not is_off and work_h > 0) else 0,
-                                    '_is_weekend': is_weekend # 內部標記用於格式化
+                                    '_is_weekend': is_weekend
                                 })
                         except: pass
                     
@@ -106,23 +103,20 @@ def process_data_v14_2_5(file):
 uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
 if uploaded_file:
-    # (時戳掃描邏輯維持不變)
+    # 檔案屬性偵測
     try:
         uploaded_file.seek(0)
         wb_prop = openpyxl.load_workbook(uploaded_file, read_only=True)
         props = wb_prop.properties
-        time_fmt = "%Y年%m月%d日 %H:%M:%S"
-        m_time = props.modified.strftime(time_fmt) if props.modified else "數據遺失"
-        e_time = props.created.strftime(time_fmt) if props.created else "數據遺失"
-        last_user = props.lastModifiedBy if props.lastModifiedBy else "未知成員"
+        m_time = props.modified.strftime("%Y/%m/%d %H:%M:%S") if props.modified else "Unknown"
         st.success(f"📡 檔案掃描成功！ 最後修改：{m_time}")
         uploaded_file.seek(0)
     except: pass
 
     if st.button("🚀 啟動衛星連線分析"):
-        result = process_data_v14_2_5(uploaded_file)
+        result = process_data_v14_2_6(uploaded_file)
         if result == "INCOMPATIBLE":
-            st.error("❌ 偵測到不相容檔案。")
+            st.error("❌ 檔案相容性異常。")
         else:
             month_dict = result
             output_excel = BytesIO()
@@ -153,13 +147,11 @@ if uploaded_file:
                             val = row[col_n]
                             fmt_dict = {'border': 1, 'align': 'left'}
                             if is_person_boundary: fmt_dict['bottom'] = 2
-                            
                             if col_n == '人員':
                                 fmt_dict['font_color'] = c_sets['text']; fmt_dict['bg_color'] = c_sets['bg']
                             elif is_off:
                                 fmt_dict['bg_color'] = '#FF0000'; fmt_dict['font_color'] = '#000000'
                             elif col_n == '實際產出工時' and row['_is_weekend'] and not is_off:
-                                # 週末加成高亮設定
                                 fmt_dict['bg_color'] = '#FFE0B2'; fmt_dict['bold'] = True; fmt_dict['font_color'] = '#E65100'
                             elif col_n == '加班':
                                 fmt_dict['font_color'] = '#FF0000'
@@ -169,7 +161,7 @@ if uploaded_file:
                             ws_d.write(r_idx + 1, c_idx, val, wb.add_format(fmt_dict))
                     ws_d.set_column('A:L', 15)
                     
-                    # --- 摘要頁 ---
+                    # --- 摘要頁 (加班紅字優化) ---
                     sheet_s = f"{safe_m}_摘要"
                     summary.to_excel(writer, index=False, sheet_name=sheet_s)
                     ws_s = writer.sheets[sheet_s]
@@ -181,9 +173,13 @@ if uploaded_file:
                             sum_fmt = {'border': 1, 'num_format': '0.0', 'align': 'left'}
                             if col_n == '人員':
                                 sum_fmt['font_color'] = c_sets_s['text']; sum_fmt['bg_color'] = c_sets_s['bg']
-                            elif col_n == '加班' and val_s > 20.0:
-                                sum_fmt['bg_color'] = '#FF0000'; sum_fmt['font_color'] = '#FFFFFF'; sum_fmt['bold'] = True
+                            elif col_n == '加班':
+                                # --- V14.2.6 更新：加班全面紅字，20H 以上加強警示 ---
+                                if val_s > 20.0:
+                                    sum_fmt['bg_color'] = '#FF0000'; sum_fmt['font_color'] = '#FFFFFF'; sum_fmt['bold'] = True
+                                else:
+                                    sum_fmt['font_color'] = '#FF0000'
                             ws_s.write(r_idx + 1, c_idx, val_s, wb.add_format(sum_fmt))
                     ws_s.set_column('A:E', 15)
 
-            st.download_button("📥 下載 V14.2.5 週末標註報告", output_excel.getvalue(), "化石先生報告.xlsx")
+            st.download_button("📥 下載 V14.2.6 視覺警告版", output_excel.getvalue(), "化石先生報告.xlsx")
