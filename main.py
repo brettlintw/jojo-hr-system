@@ -3,10 +3,10 @@ import streamlit as st
 from io import BytesIO
 import openpyxl
 
-# V14.0.2 雲端最終版：欄位重排 + 備註最右 + 取消正常(8h) + 用餐灰字
+# V14.0.3 雲端最終版：摘要與明細邏輯完全同步 + 取消正常(8h) + 備註最右
 st.set_page_config(page_title="化石先生(JoJo)：雲端工時分析系統", layout="wide")
 
-def process_data_v14_0_2(file):
+def process_data_v14_0_3(file):
     try:
         file.seek(0)
         all_sheets = pd.read_excel(file, sheet_name=None, header=None)
@@ -39,15 +39,14 @@ def process_data_v14_0_2(file):
                             shift = str(rows.iloc[idx, col_idx]).strip()
                             
                             if shift != "nan" or work_h > 0:
-                                # 1. 休息時間判定
+                                # 1. 休息時間判定邏輯 (與明細一致)
                                 rest_h = 0.0
                                 if work_h >= 8.0: rest_h = 1.0
                                 elif 4.0 < work_h < 8.0: rest_h = 0.5
                                 
-                                # 2. 加班計算 (工時 - 8.0 - 休息)
+                                # 2. 加班計算邏輯
                                 over_h = round(max(work_h - 8.0 - rest_h, 0.0), 1) if work_h > 8.0 else 0.0
                                 
-                                # 3. 休假符號化
                                 is_off = (shift == "休")
                                 start_t = "-" if is_off else str(rows.iloc[idx+1, col_idx]).strip()[:5]
                                 end_t = "-" if is_off else str(rows.iloc[idx+2, col_idx]).strip()[:5]
@@ -61,15 +60,15 @@ def process_data_v14_0_2(file):
                                     '休息時間/用餐': rest_h,
                                     '用餐(填單人)': round(float(rows.iloc[idx+4, col_idx]), 1) if pd.notnull(rows.iloc[idx+4, col_idx]) else 0.0,
                                     '加班': over_h,
-                                    '月總工時': 0.0, # 稍後更新
+                                    '月總工時': 0.0, # 稍後在人員循環末尾更新
                                     '備註': str(rows.iloc[idx+5, col_idx]).strip() if pd.notnull(rows.iloc[idx+5, col_idx]) else "",
-                                    '出勤計算': 1 if (not is_off and work_h > 0) else 0,
-                                    '正常_隱藏': round(min(work_h, 8.0), 1) # 僅供摘要計算用
+                                    '出勤計算': 1 if (not is_off and work_h > 0) else 0
                                 })
                         except: pass
                     
-                    total_m = sum(r['當日工時'] for r in person_records)
-                    for r in person_records: r['月總工時'] = round(total_m, 1)
+                    # 計算該人員的總和 (與明細邏輯同步)
+                    total_work_h = sum(r['當日工時'] for r in person_records)
+                    for r in person_records: r['月總工時'] = round(total_work_h, 1)
                     all_records.extend(person_records)
                     idx += 6 
                 else: idx += 1
@@ -78,15 +77,15 @@ def process_data_v14_0_2(file):
     except: return None
 
 # --- UI ---
-st.title("🛡️ 化石先生(JoJo)：雲端工時分析系統 (V14.0.2)")
-st.info("系統校準：備註已移至最右側，取消正常工時顯示，用餐欄位套用灰字。")
+st.title("🛡️ 化石先生(JoJo)：雲端工時分析系統 (V14.0.3)")
+st.info("系統校準：摘要與明細邏輯已完全同步，取消正常(8h)顯示，新增當月工時總計。")
 
 uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
 if uploaded_file and st.button("🚀 啟動分析"):
-    month_dict = process_data_v14_0_2(uploaded_file)
+    month_dict = process_data_v14_0_3(uploaded_file)
     if month_dict:
-        st.success("數據掃描完成。")
+        st.success("數據掃描與邏輯鏡像完成。")
         output_excel = BytesIO()
         with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
             wb = writer.book
@@ -94,13 +93,29 @@ if uploaded_file and st.button("🚀 啟動分析"):
             
             for month, data in month_dict.items():
                 safe_m = str(month)[:25]
-                summary = data.groupby('人員').agg({'出勤計算': 'sum', '正常_隱藏': 'sum', '加班': 'sum'}).reset_index()
-                summary.rename(columns={'出勤計算': '總工作天數', '正常_隱藏': '正常(8h)'}, inplace=True)
-                summary['月總工時'] = summary['正常(8h)'] + summary['加班']
+                
+                # --- 摘要數據計算 (邏輯與明細同步) ---
+                summary = data.groupby('人員').agg({
+                    '出勤計算': 'sum', 
+                    '休息時間/用餐': 'sum', 
+                    '加班': 'sum',
+                    '當日工時': 'sum'  # 這是「當月工時」
+                }).reset_index()
+                
+                summary.rename(columns={
+                    '出勤計算': '總工作天數', 
+                    '當日工時': '當月工時'
+                }, inplace=True)
+                
+                # 月總工時計算方式與明細一致 (此處直接對齊)
+                summary['月總工時'] = summary['當月工時']
+                
+                # 重新排列摘要欄位順序
+                summary = summary[['人員', '總工作天數', '休息時間/用餐', '加班', '當月工時', '月總工時']]
                 
                 # --- A. 明細頁渲染 ---
                 sheet_d = f"{safe_m}_明細"
-                display_data = data.drop(columns=['出勤計算', '正常_隱藏'])
+                display_data = data.drop(columns=['出勤計算'])
                 display_data.to_excel(writer, index=False, sheet_name=sheet_d)
                 ws_d = writer.sheets[sheet_d]
                 for c_idx, col in enumerate(display_data.columns): ws_d.write(0, c_idx, col, head_f)
@@ -118,13 +133,13 @@ if uploaded_file and st.button("🚀 啟動分析"):
                             fmt_p['bg_color'] = '#FF0000'
                             fmt_p['font_color'] = '#000000'
                         else:
-                            if col_n == '用餐(填單人)': fmt_p['font_color'] = '#808080' # 灰色字
-                            elif col_n == '加班': fmt_p['font_color'] = '#FF0000' # 加班紅字
+                            if col_n == '用餐(填單人)': fmt_p['font_color'] = '#808080'
+                            elif col_n == '加班': fmt_p['font_color'] = '#FF0000'
                             elif col_n == '星期' and row[col_n] in ['週六', '週日']: 
                                 fmt_p['font_color'] = '#FF0000'
                                 fmt_p['bold'] = True
                         ws_d.write(r_idx + 1, c_idx, row[col_n], wb.add_format(fmt_p))
-                ws_d.set_column('A:M', 15)
+                ws_d.set_column('A:O', 15)
                 
                 # --- B. 摘要頁渲染 ---
                 sheet_s = f"{safe_m}_摘要"
@@ -137,6 +152,6 @@ if uploaded_file and st.button("🚀 啟動分析"):
                         sum_fmt = {'border': 1, 'num_format': '0.0', 'align': 'left'}
                         if col_n == '加班': sum_fmt['font_color'] = '#FF0000'
                         ws_s.write(r_idx + 1, c_idx, row_s[col_n], wb.add_format(sum_fmt))
-                ws_s.set_column('A:E', 15)
+                ws_s.set_column('A:F', 15)
 
-        st.download_button("📥 下載 V14.0.2 欄位優化報告", output_excel.getvalue(), "化石先生進階報告.xlsx")
+        st.download_button("📥 下載 V14.0.3 邏輯同步報告", output_excel.getvalue(), "化石先生進階報告.xlsx")
