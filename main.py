@@ -78,7 +78,7 @@ def process_data_v13_9_8(file):
     except: return None
 
 # --- UI ---
-st.title("🛡️ 化石先生(JoJo)：雲端工時分析系統 (V13.8.8+)")
+st.title("🛡️ 化石先生(JoJo)：雲端工時分析系統 (V13.9.8)")
 st.info("系統校準：V13.9.8 已啟動。休息時間自動判定，加班已扣除休息並紅字化，人員多彩識別。")
 
 uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
@@ -91,7 +91,6 @@ if uploaded_file and st.button("🚀 啟動衛星連線分析"):
         with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
             wb = writer.book
             
-            # 定義標頭與摘要格式
             head_f = wb.add_format({'bold': 1, 'font_color': 'blue', 'border': 1, 'align': 'left', 'valign': 'vcenter'})
             sum_body_f = wb.add_format({'border': 1, 'num_format': '0.0', 'align': 'left'})
             
@@ -122,22 +121,14 @@ if uploaded_file and st.button("🚀 啟動衛星連線分析"):
                     
                     for c_idx, col_n in enumerate(display_data.columns):
                         val = row[col_n]
-                        # 全域靠左對齊
                         fmt_p = {'border': 1, 'num_format': '0.0', 'align': 'left'}
                         
-                        # 人員文字顏色
                         if col_n == '人員':
                             fmt_p['font_color'] = p_text_map.get(p_name)
-                        
-                        # 班次為「休」：整行紅字 (不含人員)
                         elif is_off:
                             fmt_p['font_color'] = '#FF0000'
-                        
-                        # 加班欄位紅字
                         elif col_n == '加班':
                             fmt_p['font_color'] = '#FF0000'
-                        
-                        # 週末紅字標示
                         elif col_n == '星期' and val in ['週六', '週日']:
                             fmt_p['font_color'] = '#FF0000'
                             fmt_p['bold'] = True
