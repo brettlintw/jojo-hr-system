@@ -3,10 +3,10 @@ import streamlit as st
 from io import BytesIO
 import openpyxl
 
-# V14.0.3 雲端最終版：摘要與明細邏輯完全同步 + 取消正常(8h) + 備註最右
+# V14.0.6 雲端最終版：摘要人員雙重多彩(字+底色) + 欄位順序校準 + 全域邏輯同步
 st.set_page_config(page_title="化石先生(JoJo)：雲端工時分析系統", layout="wide")
 
-def process_data_v14_0_3(file):
+def process_data_v14_0_6(file):
     try:
         file.seek(0)
         all_sheets = pd.read_excel(file, sheet_name=None, header=None)
@@ -39,12 +39,12 @@ def process_data_v14_0_3(file):
                             shift = str(rows.iloc[idx, col_idx]).strip()
                             
                             if shift != "nan" or work_h > 0:
-                                # 1. 休息時間判定邏輯 (與明細一致)
+                                # 休息時間判定
                                 rest_h = 0.0
                                 if work_h >= 8.0: rest_h = 1.0
                                 elif 4.0 < work_h < 8.0: rest_h = 0.5
                                 
-                                # 2. 加班計算邏輯
+                                # 加班計算
                                 over_h = round(max(work_h - 8.0 - rest_h, 0.0), 1) if work_h > 8.0 else 0.0
                                 
                                 is_off = (shift == "休")
@@ -60,13 +60,12 @@ def process_data_v14_0_3(file):
                                     '休息時間/用餐': rest_h,
                                     '用餐(填單人)': round(float(rows.iloc[idx+4, col_idx]), 1) if pd.notnull(rows.iloc[idx+4, col_idx]) else 0.0,
                                     '加班': over_h,
-                                    '月總工時': 0.0, # 稍後在人員循環末尾更新
+                                    '月總工時': 0.0, 
                                     '備註': str(rows.iloc[idx+5, col_idx]).strip() if pd.notnull(rows.iloc[idx+5, col_idx]) else "",
                                     '出勤計算': 1 if (not is_off and work_h > 0) else 0
                                 })
                         except: pass
                     
-                    # 計算該人員的總和 (與明細邏輯同步)
                     total_work_h = sum(r['當日工時'] for r in person_records)
                     for r in person_records: r['月總工時'] = round(total_work_h, 1)
                     all_records.extend(person_records)
@@ -77,81 +76,93 @@ def process_data_v14_0_3(file):
     except: return None
 
 # --- UI ---
-st.title("🛡️ 化石先生(JoJo)：雲端工時分析系統 (V14.0.3)")
-st.info("系統校準：摘要與明細邏輯已完全同步，取消正常(8h)顯示，新增當月工時總計。")
+st.title("🛡️ 化石先生(JoJo)：雲端工時分析系統 (V14.0.6)")
+st.info("系統校準：摘要頁「人員」已同步「多彩文字+多彩底色」，全域視覺強化完成。")
 
 uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
-if uploaded_file and st.button("🚀 啟動分析"):
-    month_dict = process_data_v14_0_3(uploaded_file)
+if uploaded_file and st.button("🚀 啟動衛星連線分析"):
+    month_dict = process_data_v14_0_6(uploaded_file)
     if month_dict:
-        st.success("數據掃描與邏輯鏡像完成。")
+        st.success("數據掃描與視覺多彩對齊完成。")
         output_excel = BytesIO()
         with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
             wb = writer.book
             head_f = wb.add_format({'bold': 1, 'font_color': 'blue', 'border': 1, 'align': 'left', 'valign': 'vcenter'})
             
+            # 定義全域多彩顏色清單 (文字 + 底色)
+            p_colors = [
+                {'text': '#0000FF', 'bg': '#E1F5FE'}, # 藍
+                {'text': '#008000', 'bg': '#E8F5E9'}, # 綠
+                {'text': '#800080', 'bg': '#F3E5F5'}, # 紫
+                {'text': '#FF8C00', 'bg': '#FFF3E0'}, # 橘
+                {'text': '#008080', 'bg': '#E0F2F1'}, # 青
+                {'text': '#A52A2A', 'bg': '#EFEBE9'}, # 褐
+                {'text': '#2F4F4F', 'bg': '#ECEFF1'}  # 灰藍
+            ]
+            
             for month, data in month_dict.items():
                 safe_m = str(month)[:25]
                 
-                # --- 摘要數據計算 (邏輯與明細同步) ---
-                summary = data.groupby('人員').agg({
-                    '出勤計算': 'sum', 
-                    '休息時間/用餐': 'sum', 
-                    '加班': 'sum',
-                    '當日工時': 'sum'  # 這是「當月工時」
-                }).reset_index()
-                
-                summary.rename(columns={
-                    '出勤計算': '總工作天數', 
-                    '當日工時': '當月工時'
-                }, inplace=True)
-                
-                # 月總工時計算方式與明細一致 (此處直接對齊)
+                # --- A. 摘要數據計算 ---
+                summary = data.groupby('人員').agg({'出勤計算': 'sum', '當日工時': 'sum', '休息時間/用餐': 'sum', '加班': 'sum'}).reset_index()
+                summary.rename(columns={'出勤計算': '總工作天數', '當日工時': '當月工時'}, inplace=True)
                 summary['月總工時'] = summary['當月工時']
+                summary = summary[['人員', '總工作天數', '當月工時', '休息時間/用餐', '加班', '月總工時']]
                 
-                # 重新排列摘要欄位順序
-                summary = summary[['人員', '總工作天數', '休息時間/用餐', '加班', '當月工時', '月總工時']]
+                # 建立多彩顏色映射
+                p_unique = data['人員'].unique()
+                p_color_map = {p: p_colors[i % len(p_colors)] for i, p in enumerate(p_unique)}
                 
-                # --- A. 明細頁渲染 ---
+                # --- B. 明細頁渲染 ---
                 sheet_d = f"{safe_m}_明細"
                 display_data = data.drop(columns=['出勤計算'])
                 display_data.to_excel(writer, index=False, sheet_name=sheet_d)
                 ws_d = writer.sheets[sheet_d]
                 for c_idx, col in enumerate(display_data.columns): ws_d.write(0, c_idx, col, head_f)
                 
-                text_colors = ['#0000FF', '#008000', '#800080', '#FF8C00', '#008080', '#A52A2A', '#2F4F4F']
-                p_text_map = {p: text_colors[i % len(text_colors)] for i, p in enumerate(display_data['人員'].unique())}
-                
                 for r_idx in range(len(display_data)):
                     row = display_data.iloc[r_idx]
                     is_off = (str(row['班次']).strip() == "休")
+                    c_sets = p_color_map.get(row['人員'])
+                    
                     for c_idx, col_n in enumerate(display_data.columns):
                         fmt_p = {'border': 1, 'num_format': '0.0', 'align': 'left'}
-                        if col_n == '人員': fmt_p['font_color'] = p_text_map.get(row['人員'], '#000000')
+                        if col_n == '人員':
+                            # 人員欄位：多彩文字 + 對應多彩底色填滿
+                            fmt_p['font_color'] = c_sets['text']
+                            fmt_p['bg_color'] = c_sets['bg'] # 多彩底色
                         elif is_off:
-                            fmt_p['bg_color'] = '#FF0000'
-                            fmt_p['font_color'] = '#000000'
+                            fmt_p['bg_color'] = '#FF0000' # 休假紅底
+                            fmt_p['font_color'] = '#000000' # 黑字
                         else:
-                            if col_n == '用餐(填單人)': fmt_p['font_color'] = '#808080'
-                            elif col_n == '加班': fmt_p['font_color'] = '#FF0000'
+                            if col_n == '用餐(填單人)': fmt_p['font_color'] = '#808080' # 灰字
+                            elif col_n == '加班': fmt_p['font_color'] = '#FF0000' # 加班紅字
                             elif col_n == '星期' and row[col_n] in ['週六', '週日']: 
                                 fmt_p['font_color'] = '#FF0000'
                                 fmt_p['bold'] = True
                         ws_d.write(r_idx + 1, c_idx, row[col_n], wb.add_format(fmt_p))
                 ws_d.set_column('A:O', 15)
                 
-                # --- B. 摘要頁渲染 ---
+                # --- C. 摘要頁渲染 ---
                 sheet_s = f"{safe_m}_摘要"
                 summary.to_excel(writer, index=False, sheet_name=sheet_s)
                 ws_s = writer.sheets[sheet_s]
                 for c_idx, col in enumerate(summary.columns): ws_s.write(0, c_idx, col, head_f)
+                
                 for r_idx in range(len(summary)):
                     row_s = summary.iloc[r_idx]
+                    c_sets_s = p_color_map.get(row_s['人員'])
+                    
                     for c_idx, col_n in enumerate(summary.columns):
                         sum_fmt = {'border': 1, 'num_format': '0.0', 'align': 'left'}
-                        if col_n == '加班': sum_fmt['font_color'] = '#FF0000'
+                        if col_n == '人員':
+                            # 摘要人員欄位：多彩文字 + 對應多彩底色填滿 (與明細一致)
+                            sum_fmt['font_color'] = c_sets_s['text']
+                            sum_fmt['bg_color'] = c_sets_s['bg'] # 多彩底色
+                        elif col_n == '加班':
+                            sum_fmt['font_color'] = '#FF0000' # 加班紅字
                         ws_s.write(r_idx + 1, c_idx, row_s[col_n], wb.add_format(sum_fmt))
                 ws_s.set_column('A:F', 15)
 
-        st.download_button("📥 下載 V14.0.3 邏輯同步報告", output_excel.getvalue(), "化石先生進階報告.xlsx")
+        st.download_button("📥 下載 V14.0.6 全域多彩區隔報告", output_excel.getvalue(), "化石先生報告.xlsx")
