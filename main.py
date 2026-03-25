@@ -5,7 +5,7 @@ import openpyxl
 from datetime import datetime
 from PIL import Image
 
-# V14.2.0 雲端品牌旗艦校準版：Logo 路徑防錯 + 格式物件穩定化 + 20H 預警
+# V14.2.2 雲端品牌校準穩定版：更新休息時間判定邏輯 + 20H 加班預警 + 實際產出工時
 st.set_page_config(page_title="化石先生：雲端工時分析系統", layout="wide")
 
 # --- UI 品牌頭部設定 (Logo 與 標題) ---
@@ -13,18 +13,18 @@ def display_header():
     col_logo, col_title = st.columns([1, 6])
     with col_logo:
         try:
-            # 讀取 Logo 檔案
+            # 讀取與 main.py 同資料夾內的 Logo 檔案
             img = Image.open('rsz_mrfossillogo_20190422182824.png')
             st.image(img, width=150)
         except Exception:
-            st.error("📷 Logo 遺失")
+            st.error("📷 Logo 檔案未讀取到：請確認與 main.py 同資料夾內有 rsz_mrfossillogo_20190422182824.png")
     with col_title:
-        st.title("化石先生：雲端工時分析系統 (V14.2.0)")
+        st.title("化石先生：雲端工時分析系統 (V14.2.2)")
     st.markdown("---")
 
 display_header()
 
-def process_data_v14_2_0(file):
+def process_data_v14_2_2(file):
     try:
         file.seek(0)
         all_sheets = pd.read_excel(file, sheet_name=None, header=None)
@@ -60,8 +60,15 @@ def process_data_v14_2_0(file):
                             shift = str(rows.iloc[idx, col_idx]).strip()
                             
                             if shift != "nan" or work_h > 0:
-                                # 休息時間判定
-                                rest_h = 1.0 if work_h >= 8.0 else (0.5 if 4.0 < work_h < 8.0 else 0.0)
+                                # --- V14.2.2 更新：休息時間判定邏輯 (以總時數為基準) ---
+                                # 休息時間判定：<4h=0, 4~8h=0.5, >8h=1.0
+                                if work_h < 4.0:
+                                    rest_h = 0.0
+                                elif 4.0 <= work_h <= 8.0:
+                                    rest_h = 0.5
+                                else: # work_h > 8.0
+                                    rest_h = 1.0
+                                
                                 # 加班計算
                                 over_h = round(max(work_h - 8.0 - rest_h, 0.0), 1) if work_h > 8.0 else 0.0
                                 # 實際產出工時
@@ -94,7 +101,7 @@ def process_data_v14_2_0(file):
         return month_data_dict if month_data_dict else "INCOMPATIBLE"
     except: return "INCOMPATIBLE"
 
-# --- 檔案導入 UI ---
+# --- 檔案導入 UI 與 2026/03/25 時戳掃描 ---
 uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
 if uploaded_file:
@@ -116,13 +123,12 @@ if uploaded_file:
     except: st.warning("⚠️ 偵測儀讀取異常。")
 
     if st.button("🚀 啟動衛星連線分析"):
-        result = process_data_v14_2_0(uploaded_file)
+        result = process_data_v14_2_2(uploaded_file)
         
         if result == "INCOMPATIBLE":
             st.error("❌ 偵測到不相容檔案：請確認上傳的是包含「人員」與「日期」特徵的原始排班表。")
         else:
             month_dict = result
-            st.success("數據校準與品牌渲染完成。")
             output_excel = BytesIO()
             with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
                 wb = writer.book
@@ -188,4 +194,4 @@ if uploaded_file:
                             ws_s.write(r_idx + 1, c_idx, val_s, wb.add_format(sum_fmt_dict))
                     ws_s.set_column('A:E', 15)
 
-            st.download_button("📥 下載 V14.2.0 旗艦校準報告", output_excel.getvalue(), "化石先生報告.xlsx")
+            st.download_button("📥 下載 V14.2.2 邏輯校準報告", output_excel.getvalue(), "化石先生報告.xlsx")
