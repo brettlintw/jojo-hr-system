@@ -4,10 +4,10 @@ from io import BytesIO
 import openpyxl
 from datetime import datetime
 
-# V14.1.4 雲端最終校準版：格式物件宣告優化 + 20H 加班預警 + 精確時戳偵測
+# V14.1.6 雲端最終校準版：修正欄位索引位移 + 實際產出工時 + 20H 加班預警 + 精確時戳偵測
 st.set_page_config(page_title="化石先生(JoJo)：雲端工時分析系統", layout="wide")
 
-def process_data_v14_1_4(file):
+def process_data_v14_1_6(file):
     try:
         file.seek(0)
         all_sheets = pd.read_excel(file, sheet_name=None, header=None)
@@ -40,8 +40,12 @@ def process_data_v14_1_4(file):
                             shift = str(rows.iloc[idx, col_idx]).strip()
                             
                             if shift != "nan" or work_h > 0:
+                                # 休息時間判定
                                 rest_h = 1.0 if work_h >= 8.0 else (0.5 if 4.0 < work_h < 8.0 else 0.0)
+                                # 加班計算
                                 over_h = round(max(work_h - 8.0 - rest_h, 0.0), 1) if work_h > 8.0 else 0.0
+                                # 實際產出工時：當日工時 - 休息時間/用餐
+                                actual_h = round(work_h - rest_h, 1)
                                 
                                 is_off = (shift == "休")
                                 start_t = "-" if is_off else str(rows.iloc[idx+1, col_idx]).strip()[:5]
@@ -52,7 +56,9 @@ def process_data_v14_1_4(file):
                                     '人員': person, '日期': target_date, '星期': f"週{['一','二','三','四','五','六','日'][dt_obj.weekday()]}",
                                     '班次': shift if shift != "nan" else "",
                                     '上班': start_t, '下班': end_t,
-                                    '當日工時': work_h, '休息時間/用餐': rest_h,
+                                    '當日工時': work_h, 
+                                    '休息時間/用餐': rest_h,
+                                    '實際產出工時': actual_h,
                                     '用餐(填單人)': round(float(rows.iloc[idx+4, col_idx]), 1) if pd.notnull(rows.iloc[idx+4, col_idx]) else 0.0,
                                     '加班': over_h,
                                     '備註': str(rows.iloc[idx+5, col_idx]).strip() if pd.notnull(rows.iloc[idx+5, col_idx]) else "",
@@ -70,7 +76,7 @@ def process_data_v14_1_4(file):
     except: return None
 
 # --- UI ---
-st.title("🛡️ 化石先生(JoJo)：雲端工時分析系統 (V14.1.4)")
+st.title("🛡️ 化石先生(JoJo)：雲端工時分析系統 (V14.1.6)")
 
 uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
@@ -94,8 +100,9 @@ if uploaded_file:
         st.warning("⚠️ 偵測儀讀取異常。")
 
     if st.button("🚀 啟動衛星連線分析"):
-        month_dict = process_data_v14_1_4(uploaded_file)
+        month_dict = process_data_v14_1_6(uploaded_file)
         if month_dict:
+            st.success("數據掃描與欄位排序校準完成。")
             output_excel = BytesIO()
             with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
                 wb = writer.book
@@ -119,7 +126,7 @@ if uploaded_file:
                     
                     # --- A. 明細頁 ---
                     sheet_d = f"{safe_m}_明細"
-                    cols_d = ['人員', '日期', '星期', '班次', '上班', '下班', '當日工時', '休息時間/用餐', '用餐(填單人)', '加班', '月總工時', '備註']
+                    cols_d = ['人員', '日期', '星期', '班次', '上班', '下班', '當日工時', '休息時間/用餐', '實際產出工時', '用餐(填單人)', '加班', '月總工時', '備註']
                     data[cols_d].to_excel(writer, index=False, sheet_name=sheet_d)
                     ws_d = writer.sheets[sheet_d]
                     for c_idx, col_n in enumerate(cols_d): ws_d.write(0, c_idx, col_n, head_f)
@@ -130,7 +137,7 @@ if uploaded_file:
                         for c_idx, col_n in enumerate(cols_d):
                             val = row[col_n]
                             fmt_dict = {'border': 1, 'num_format': '0.0', 'align': 'left'}
-                            if c_idx == 0:
+                            if col_n == '人員':
                                 fmt_dict['font_color'] = c_sets['text']; fmt_dict['bg_color'] = c_sets['bg']
                             elif is_off:
                                 fmt_dict['bg_color'] = '#FF0000'; fmt_dict['font_color'] = '#000000'
@@ -140,7 +147,7 @@ if uploaded_file:
                                 elif col_n == '星期' and val in ['週六', '週日']: 
                                     fmt_dict['font_color'] = '#FF0000'; fmt_dict['bold'] = True
                             ws_d.write(r_idx + 1, c_idx, val, wb.add_format(fmt_dict))
-                    ws_d.set_column('A:L', 15)
+                    ws_d.set_column('A:M', 15)
                     
                     # --- B. 摘要頁 ---
                     sheet_s = f"{safe_m}_摘要"
@@ -152,19 +159,14 @@ if uploaded_file:
                         for c_idx, col_n in enumerate(summary.columns):
                             val_s = row_s[col_n]
                             sum_fmt_dict = {'border': 1, 'num_format': '0.0', 'align': 'left'}
-                            
                             if col_n == '人員':
-                                sum_fmt_dict['font_color'] = c_sets_s['text']
-                                sum_fmt_dict['bg_color'] = c_sets_s['bg']
+                                sum_fmt_dict['font_color'] = c_sets_s['text']; sum_fmt_dict['bg_color'] = c_sets_s['bg']
                             elif col_n == '加班':
                                 if val_s > 20.0:
-                                    sum_fmt_dict['bg_color'] = '#FF0000'
-                                    sum_fmt_dict['font_color'] = '#FFFFFF'
-                                    sum_fmt_dict['bold'] = True
+                                    sum_fmt_dict['bg_color'] = '#FF0000'; sum_fmt_dict['font_color'] = '#FFFFFF'; sum_fmt_dict['bold'] = True
                                 else:
                                     sum_fmt_dict['font_color'] = '#FF0000'
-                            
                             ws_s.write(r_idx + 1, c_idx, val_s, wb.add_format(sum_fmt_dict))
                     ws_s.set_column('A:E', 15)
 
-            st.download_button("📥 下載 V14.1.4 最終校準報告", output_excel.getvalue(), "化石先生報告.xlsx")
+            st.download_button("📥 下載 V14.1.6 終極校準報告", output_excel.getvalue(), "化石先生報告.xlsx")
