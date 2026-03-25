@@ -138,4 +138,54 @@ if uploaded_file:
                 for month, data in month_dict.items():
                     safe_m = str(month)[:25]
                     summary = data.groupby('人員').agg({'出勤計算': 'sum', '當日工時': 'sum', '休息時間/用餐': 'sum', '加班': 'sum'}).reset_index()
-                    summary.rename(columns={'出勤計算': '總工作天數', '
+                    summary.rename(columns={'出勤計算': '總工作天數', '當日工時': '當月工時'}, inplace=True)
+                    summary = summary[['人員', '總工作天數', '當月工時', '休息時間/用餐', '加班']]
+                    
+                    p_color_map = {p: p_colors[i % len(p_colors)] for i, p in enumerate(data['人員'].unique())}
+                    
+                    # --- 明細頁渲染 ---
+                    sheet_d = f"{safe_m}_明細"
+                    cols_d = ['人員', '日期', '星期', '班次', '上班', '下班', '當日工時', '休息時間/用餐', '實際產出工時', '用餐(填單人)', '加班', '月總工時', '備註']
+                    data[cols_d].to_excel(writer, index=False, sheet_name=sheet_d)
+                    ws_d = writer.sheets[sheet_d]
+                    for c_idx, col_n in enumerate(cols_d): ws_d.write(0, c_idx, col_n, head_f)
+                    
+                    for r_idx, row in data.iterrows():
+                        is_off = (str(row['班次']).strip() == "休")
+                        c_sets = p_color_map.get(row['人員'])
+                        for c_idx, col_n in enumerate(cols_d):
+                            val = row[col_n]
+                            fmt_dict = {'border': 1, 'num_format': '0.0', 'align': 'left'}
+                            if col_n == '人員':
+                                fmt_dict['font_color'] = c_sets['text']; fmt_dict['bg_color'] = c_sets['bg']
+                            elif is_off:
+                                fmt_dict['bg_color'] = '#FF0000'; fmt_dict['font_color'] = '#000000'
+                            else:
+                                if col_n == '用餐(填單人)': fmt_dict['font_color'] = '#808080'
+                                elif col_n == '加班': fmt_dict['font_color'] = '#FF0000'
+                                elif col_n == '星期' and val in ['週六', '週日']: 
+                                    fmt_dict['font_color'] = '#FF0000'; fmt_dict['bold'] = True
+                            ws_d.write(r_idx + 1, c_idx, val, wb.add_format(fmt_dict))
+                    ws_d.set_column('A:M', 15)
+                    
+                    # --- 摘要頁渲染 ---
+                    sheet_s = f"{safe_m}_摘要"
+                    summary.to_excel(writer, index=False, sheet_name=sheet_s)
+                    ws_s = writer.sheets[sheet_s]
+                    for c_idx, col_n in enumerate(summary.columns): ws_s.write(0, c_idx, col_n, head_f)
+                    for r_idx, row_s in summary.iterrows():
+                        c_sets_s = p_color_map.get(row_s['人員'])
+                        for c_idx, col_n in enumerate(summary.columns):
+                            val_s = row_s[col_n]
+                            sum_fmt_dict = {'border': 1, 'num_format': '0.0', 'align': 'left'}
+                            if col_n == '人員':
+                                sum_fmt_dict['font_color'] = c_sets_s['text']; sum_fmt_dict['bg_color'] = c_sets_s['bg']
+                            elif col_n == '加班':
+                                if val_s > 20.0:
+                                    sum_fmt_dict['bg_color'] = '#FF0000'; sum_fmt_dict['font_color'] = '#FFFFFF'; sum_fmt_dict['bold'] = True
+                                else:
+                                    sum_fmt_dict['font_color'] = '#FF0000'
+                            ws_s.write(r_idx + 1, c_idx, val_s, wb.add_format(sum_fmt_dict))
+                    ws_s.set_column('A:E', 15)
+
+            st.download_button("📥 下載 V14.2.0 旗艦校準報告", output_excel.getvalue(), "化石先生報告.xlsx")
