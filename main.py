@@ -4,10 +4,10 @@ from io import BytesIO
 import openpyxl
 from datetime import datetime
 
-# V14.0.9 雲端最終校準版：修正後設數據讀取指標 + 摘要欄位精確對齊
+# V14.1.4 雲端最終校準版：格式物件宣告優化 + 20H 加班預警 + 精確時戳偵測
 st.set_page_config(page_title="化石先生(JoJo)：雲端工時分析系統", layout="wide")
 
-def process_data_v14_0_9(file):
+def process_data_v14_1_4(file):
     try:
         file.seek(0)
         all_sheets = pd.read_excel(file, sheet_name=None, header=None)
@@ -40,7 +40,6 @@ def process_data_v14_0_9(file):
                             shift = str(rows.iloc[idx, col_idx]).strip()
                             
                             if shift != "nan" or work_h > 0:
-                                # 休息時間判定
                                 rest_h = 1.0 if work_h >= 8.0 else (0.5 if 4.0 < work_h < 8.0 else 0.0)
                                 over_h = round(max(work_h - 8.0 - rest_h, 0.0), 1) if work_h > 8.0 else 0.0
                                 
@@ -71,37 +70,37 @@ def process_data_v14_0_9(file):
     except: return None
 
 # --- UI ---
-st.title("🛡️ 化石先生(JoJo)：雲端工時分析系統 (V14.0.9)")
+st.title("🛡️ 化石先生(JoJo)：雲端工時分析系統 (V14.1.4)")
 
 uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
 if uploaded_file:
-    # 檔案後設數據偵測
     try:
-        uploaded_file.seek(0) # 重置指針
+        uploaded_file.seek(0)
         wb_prop = openpyxl.load_workbook(uploaded_file, read_only=True)
         props = wb_prop.properties
-        last_modified = props.modified.strftime("%Y-%m-%d %H:%M:%S") if props.modified else "無法讀取"
-        last_editor = props.lastModifiedBy if props.lastModifiedBy else "未知成員"
+        time_fmt = "%Y年%m月%d日 %H:%M:%S"
+        m_time = props.modified.strftime(time_fmt) if props.modified else "數據遺失"
+        e_time = props.created.strftime(time_fmt) if props.created else "數據遺失"
+        last_user = props.lastModifiedBy if props.lastModifiedBy else "未知成員"
         
         st.success(f"📡 檔案掃描成功！")
-        c1, c2 = st.columns(2)
-        with c1: st.metric("最後修改時間", last_modified)
-        with c2: st.metric("上次編輯成員", last_editor)
-        uploaded_file.seek(0) # 再次重置指針供分析使用
+        c1, c2, c3 = st.columns(3)
+        with c1: st.metric("最後修改時間", m_time)
+        with c2: st.metric("上次編輯時間", e_time)
+        with c3: st.metric("最後操作成員", last_user)
+        uploaded_file.seek(0)
     except:
-        st.warning("⚠️ 無法讀取檔案時間戳記。")
+        st.warning("⚠️ 偵測儀讀取異常。")
 
     if st.button("🚀 啟動衛星連線分析"):
-        month_dict = process_data_v14_0_9(uploaded_file)
+        month_dict = process_data_v14_1_4(uploaded_file)
         if month_dict:
-            st.success("數據掃描與欄位排序完成。")
             output_excel = BytesIO()
             with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
                 wb = writer.book
                 head_f = wb.add_format({'bold': 1, 'font_color': 'blue', 'border': 1, 'align': 'left', 'valign': 'vcenter'})
                 
-                # 多彩人員配色
                 p_colors = [
                     {'text': '#0000FF', 'bg': '#E1F5FE'}, {'text': '#008000', 'bg': '#E8F5E9'}, 
                     {'text': '#800080', 'bg': '#F3E5F5'}, {'text': '#FF8C00', 'bg': '#FFF3E0'}, 
@@ -115,7 +114,8 @@ if uploaded_file:
                     summary.rename(columns={'出勤計算': '總工作天數', '當日工時': '當月工時'}, inplace=True)
                     summary = summary[['人員', '總工作天數', '當月工時', '休息時間/用餐', '加班']]
                     
-                    p_color_map = {p: p_colors[i % len(p_colors)] for i, p in enumerate(data['人員'].unique())}
+                    p_unique = data['人員'].unique()
+                    p_color_map = {p: p_colors[i % len(p_colors)] for i, p in enumerate(p_unique)}
                     
                     # --- A. 明細頁 ---
                     sheet_d = f"{safe_m}_明細"
@@ -129,32 +129,42 @@ if uploaded_file:
                         c_sets = p_color_map.get(row['人員'])
                         for c_idx, col_n in enumerate(cols_d):
                             val = row[col_n]
-                            fmt_p = {'border': 1, 'num_format': '0.0', 'align': 'left'}
-                            if c_idx == 0: # 人員
-                                fmt_p['font_color'] = c_sets['text']; fmt_p['bg_color'] = c_sets['bg']
+                            fmt_dict = {'border': 1, 'num_format': '0.0', 'align': 'left'}
+                            if c_idx == 0:
+                                fmt_dict['font_color'] = c_sets['text']; fmt_dict['bg_color'] = c_sets['bg']
                             elif is_off:
-                                fmt_p['bg_color'] = '#FF0000'; fmt_p['font_color'] = '#000000'
+                                fmt_dict['bg_color'] = '#FF0000'; fmt_dict['font_color'] = '#000000'
                             else:
-                                if col_n == '用餐(填單人)': fmt_p['font_color'] = '#808080'
-                                elif col_n == '加班': fmt_p['font_color'] = '#FF0000'
+                                if col_n == '用餐(填單人)': fmt_dict['font_color'] = '#808080'
+                                elif col_n == '加班': fmt_dict['font_color'] = '#FF0000'
                                 elif col_n == '星期' and val in ['週六', '週日']: 
-                                    fmt_p['font_color'] = '#FF0000'; fmt_p['bold'] = True
-                            ws_d.write(r_idx + 1, c_idx, val, wb.add_format(fmt_p))
+                                    fmt_dict['font_color'] = '#FF0000'; fmt_dict['bold'] = True
+                            ws_d.write(r_idx + 1, c_idx, val, wb.add_format(fmt_dict))
                     ws_d.set_column('A:L', 15)
                     
                     # --- B. 摘要頁 ---
                     sheet_s = f"{safe_m}_摘要"
                     summary.to_excel(writer, index=False, sheet_name=sheet_s)
                     ws_s = writer.sheets[sheet_s]
-                    for c_idx, col in enumerate(summary.columns): ws_s.write(0, c_idx, col, head_f)
+                    for c_idx, col_n in enumerate(summary.columns): ws_s.write(0, c_idx, col_n, head_f)
                     for r_idx, row_s in summary.iterrows():
                         c_sets_s = p_color_map.get(row_s['人員'])
                         for c_idx, col_n in enumerate(summary.columns):
-                            sum_fmt = {'border': 1, 'num_format': '0.0', 'align': 'left'}
-                            if c_idx == 0:
-                                sum_fmt['font_color'] = c_sets_s['text']; sum_fmt['bg_color'] = c_sets_s['bg']
-                            elif col_n == '加班': sum_fmt['font_color'] = '#FF0000'
-                            ws_s.write(r_idx + 1, c_idx, row_s[col_n], wb.add_format(sum_fmt))
+                            val_s = row_s[col_n]
+                            sum_fmt_dict = {'border': 1, 'num_format': '0.0', 'align': 'left'}
+                            
+                            if col_n == '人員':
+                                sum_fmt_dict['font_color'] = c_sets_s['text']
+                                sum_fmt_dict['bg_color'] = c_sets_s['bg']
+                            elif col_n == '加班':
+                                if val_s > 20.0:
+                                    sum_fmt_dict['bg_color'] = '#FF0000'
+                                    sum_fmt_dict['font_color'] = '#FFFFFF'
+                                    sum_fmt_dict['bold'] = True
+                                else:
+                                    sum_fmt_dict['font_color'] = '#FF0000'
+                            
+                            ws_s.write(r_idx + 1, c_idx, val_s, wb.add_format(sum_fmt_dict))
                     ws_s.set_column('A:E', 15)
 
-            st.download_button("📥 下載 V14.0.9 校準報告", output_excel.getvalue(), "化石先生報告.xlsx")
+            st.download_button("📥 下載 V14.1.4 最終校準報告", output_excel.getvalue(), "化石先生報告.xlsx")
