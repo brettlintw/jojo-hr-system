@@ -3,11 +3,28 @@ import streamlit as st
 from io import BytesIO
 import openpyxl
 from datetime import datetime
+from PIL import Image
 
-# V14.1.8 雲端最終校準版：修正變數誤植 + 檔案相容性檢查 + 20H 加班預警
-st.set_page_config(page_title="化石先生(JoJo)：雲端工時分析系統", layout="wide")
+# V14.2.0 雲端品牌旗艦校準版：Logo 路徑防錯 + 格式物件穩定化 + 20H 預警
+st.set_page_config(page_title="化石先生：雲端工時分析系統", layout="wide")
 
-def process_data_v14_1_8(file):
+# --- UI 品牌頭部設定 (Logo 與 標題) ---
+def display_header():
+    col_logo, col_title = st.columns([1, 6])
+    with col_logo:
+        try:
+            # 讀取 Logo 檔案
+            img = Image.open('rsz_mrfossillogo_20190422182824.png')
+            st.image(img, width=150)
+        except Exception:
+            st.error("📷 Logo 遺失")
+    with col_title:
+        st.title("化石先生：雲端工時分析系統 (V14.2.0)")
+    st.markdown("---")
+
+display_header()
+
+def process_data_v14_2_0(file):
     try:
         file.seek(0)
         all_sheets = pd.read_excel(file, sheet_name=None, header=None)
@@ -23,8 +40,7 @@ def process_data_v14_1_8(file):
                     is_compatible = True
                     break
             
-            if not is_compatible:
-                continue 
+            if not is_compatible: continue 
             
             dates_raw = [str(d).split(' ')[0] if pd.notnull(d) else "" for d in df.iloc[header_idx]]
             rows = df.iloc[header_idx + 1:].reset_index(drop=True)
@@ -44,8 +60,11 @@ def process_data_v14_1_8(file):
                             shift = str(rows.iloc[idx, col_idx]).strip()
                             
                             if shift != "nan" or work_h > 0:
+                                # 休息時間判定
                                 rest_h = 1.0 if work_h >= 8.0 else (0.5 if 4.0 < work_h < 8.0 else 0.0)
+                                # 加班計算
                                 over_h = round(max(work_h - 8.0 - rest_h, 0.0), 1) if work_h > 8.0 else 0.0
+                                # 實際產出工時
                                 actual_h = round(work_h - rest_h, 1)
                                 
                                 is_off = (shift == "休")
@@ -73,12 +92,9 @@ def process_data_v14_1_8(file):
             if all_records: month_data_dict[str(sheet_name)] = pd.DataFrame(all_records)
         
         return month_data_dict if month_data_dict else "INCOMPATIBLE"
-    except:
-        return "INCOMPATIBLE"
+    except: return "INCOMPATIBLE"
 
-# --- UI ---
-st.title("🛡️ 化石先生(JoJo)：雲端工時分析系統 (V14.1.8)")
-
+# --- 檔案導入 UI ---
 uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
 if uploaded_file:
@@ -97,17 +113,15 @@ if uploaded_file:
         with c2: st.metric("上次編輯時間", e_time)
         with c3: st.metric("最後操作成員", last_user)
         uploaded_file.seek(0)
-    except:
-        st.warning("⚠️ 偵測儀讀取異常。")
+    except: st.warning("⚠️ 偵測儀讀取異常。")
 
     if st.button("🚀 啟動衛星連線分析"):
-        result = process_data_v14_1_8(uploaded_file)
+        result = process_data_v14_2_0(uploaded_file)
         
         if result == "INCOMPATIBLE":
             st.error("❌ 偵測到不相容檔案：請確認上傳的是包含「人員」與「日期」特徵的原始排班表。")
         else:
             month_dict = result
-            st.success("數據校準完成。")
             output_excel = BytesIO()
             with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
                 wb = writer.book
@@ -128,7 +142,7 @@ if uploaded_file:
                     
                     p_color_map = {p: p_colors[i % len(p_colors)] for i, p in enumerate(data['人員'].unique())}
                     
-                    # --- 明細頁 ---
+                    # --- 明細頁渲染 ---
                     sheet_d = f"{safe_m}_明細"
                     cols_d = ['人員', '日期', '星期', '班次', '上班', '下班', '當日工時', '休息時間/用餐', '實際產出工時', '用餐(填單人)', '加班', '月總工時', '備註']
                     data[cols_d].to_excel(writer, index=False, sheet_name=sheet_d)
@@ -144,8 +158,7 @@ if uploaded_file:
                             if col_n == '人員':
                                 fmt_dict['font_color'] = c_sets['text']; fmt_dict['bg_color'] = c_sets['bg']
                             elif is_off:
-                                fmt_dict['bg_color'] = '#FF0000'
-                                fmt_dict['font_color'] = '#000000' # 修正文字顏色判定
+                                fmt_dict['bg_color'] = '#FF0000'; fmt_dict['font_color'] = '#000000'
                             else:
                                 if col_n == '用餐(填單人)': fmt_dict['font_color'] = '#808080'
                                 elif col_n == '加班': fmt_dict['font_color'] = '#FF0000'
@@ -154,7 +167,7 @@ if uploaded_file:
                             ws_d.write(r_idx + 1, c_idx, val, wb.add_format(fmt_dict))
                     ws_d.set_column('A:M', 15)
                     
-                    # --- 摘要頁 ---
+                    # --- 摘要頁渲染 ---
                     sheet_s = f"{safe_m}_摘要"
                     summary.to_excel(writer, index=False, sheet_name=sheet_s)
                     ws_s = writer.sheets[sheet_s]
@@ -174,4 +187,4 @@ if uploaded_file:
                             ws_s.write(r_idx + 1, c_idx, val_s, wb.add_format(sum_fmt_dict))
                     ws_s.set_column('A:E', 15)
 
-            st.download_button("📥 下載 V14.1.8 終極校準報告", output_excel.getvalue(), "化石先生報告.xlsx")
+            st.download_button("📥 下載 V14.2.0 旗艦校準報告", output_excel.getvalue(), "化石先生報告.xlsx")
