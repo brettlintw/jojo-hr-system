@@ -5,7 +5,7 @@ import openpyxl
 from datetime import datetime
 from PIL import Image
 
-# V14.4.0 雲端品牌旗艦版：修復首行時間戳記崁入 + 明細摘要整合 + 全欄位安全排版
+# V14.4.1 雲端品牌旗艦版：介面時間資訊全字元藍色顯示 + 報表首行溯源
 st.set_page_config(page_title="化石先生：雲端工時分析系統", layout="wide")
 
 def display_header():
@@ -17,12 +17,12 @@ def display_header():
         except Exception:
             st.error("📷 Logo 遺失")
     with col_title:
-        st.title("化石先生：雲端工時分析系統 (V14.4.0)")
+        st.title("化石先生：雲端工時分析系統 (V14.4.1)")
     st.markdown("---")
 
 display_header()
 
-def process_data_v14_4_0(file):
+def process_data_v14_4_1(file):
     shift_rules = {
         'A': ('09:30', '17:30'), 'B': ('13:00', '21:00'), 'B2': ('14:00', '22:00'),
         'C': ('12:00', '20:30'), 'All': ('09:30', '21:00'), 'All2': ('09:30', '22:00')
@@ -95,16 +95,22 @@ if uploaded_file:
         meta = wb_meta.properties
         m_time = meta.modified.strftime("%Y/%m/%d %H:%M:%S") if meta.modified else "無法讀取"
         e_time = meta.created.strftime("%Y/%m/%d %H:%M:%S") if meta.created else "無法讀取"
-        st.success(f"📡 檔案掃描成功！")
-        c1, c2, c3 = st.columns(3)
-        with c1: st.metric("原始檔名", f_name)
-        with c2: st.metric("最後修改時間", m_time)
-        with c3: st.metric("上次編輯時間", e_time)
+        
+        # --- V14.4.1 更新：全字元藍色顯示 ---
+        st.markdown(f"""
+        <div style="background-color: #F0F2F6; padding: 20px; border-radius: 10px; border-left: 5px solid #0000FF;">
+            <h4 style="color: #0000FF; margin-top: 0;">📡 數據指紋監控中</h4>
+            <p style="color: #0000FF; font-size: 1.1em;"><b>原始檔名：</b>{f_name}</p>
+            <p style="color: #0000FF; font-size: 1.1em;"><b>最後修改時間：</b>{m_time}</p>
+            <p style="color: #0000FF; font-size: 1.1em;"><b>上次編輯時間：</b>{e_time}</p>
+        </div>
+        """, unsafe_allow_html=True)
     except:
         m_time, e_time = "無法讀取", "無法讀取"
+        st.warning("⚠️ 無法完全讀取檔案後設數據。")
 
     if st.button("🚀 啟動衛星連線分析"):
-        month_dict, shift_rules = process_data_v14_4_0(uploaded_file)
+        month_dict, shift_rules = process_data_v14_4_1(uploaded_file)
         if not month_dict:
             st.error("❌ 檔案相容性異常。")
         else:
@@ -112,17 +118,14 @@ if uploaded_file:
             with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
                 wb = writer.book
                 head_f = wb.add_format({'bold': 1, 'font_color': 'blue', 'border': 1, 'align': 'left', 'valign': 'vcenter'})
-                info_f = wb.add_format({'bold': 1, 'font_color': '#FFFFFF', 'bg_color': '#333333', 'align': 'left'})
+                info_f = wb.add_format({'bold': 1, 'font_color': '#FFFFFF', 'bg_color': '#0000FF', 'align': 'left'})
                 
                 # --- 班次對照表 ---
                 shift_df = pd.DataFrame([{'班次': k, '上班': v[0], '下班': v[1]} for k, v in shift_rules.items()])
                 shift_df.to_excel(writer, index=False, sheet_name='班次對照表')
                 ws_shift = writer.sheets['班次對照表']
-                bold_border_f = wb.add_format({'border': 2, 'align': 'left'})
                 for c_idx, col in enumerate(shift_df.columns): ws_shift.write(0, c_idx, col, head_f)
-                for r_idx, row_v in enumerate(shift_df.values):
-                    for c_idx, v in enumerate(row_v): ws_shift.write(r_idx + 1, c_idx, v, bold_border_f)
-                for i, col in enumerate(shift_df.columns): ws_shift.set_column(i, i, 20)
+                ws_shift.set_column(0, 2, 15)
 
                 p_colors = [{'text': '#0000FF', 'bg': '#E1F5FE'}, {'text': '#008000', 'bg': '#E8F5E9'}, {'text': '#800080', 'bg': '#F3E5F5'}, {'text': '#FF8C00', 'bg': '#FFF3E0'}, {'text': '#008080', 'bg': '#E0F2F1'}, {'text': '#A52A2A', 'bg': '#EFEBE9'}, {'text': '#2F4F4F', 'bg': '#ECEFF1'}]
                 
@@ -137,11 +140,11 @@ if uploaded_file:
                     
                     data[cols_d].to_excel(writer, index=False, sheet_name=safe_m, startrow=1)
                     ws = writer.sheets[safe_m]
+                    
+                    # 表格首行資訊
                     ws.merge_range(0, 0, 0, start_col_sum + 4, f"原始檔名：{f_name}  |  最後修改時間：{m_time}  |  上次編輯時間：{e_time}", info_f)
                     
-                    ws.autofilter(1, 0, len(data)+1, len(cols_d)-1) 
                     for c_idx, col_n in enumerate(cols_d): ws.write(1, c_idx, col_n, head_f)
-                    
                     sum_head_f = wb.add_format({'bold': 1, 'font_color': '#800000', 'border': 1, 'bg_color': '#FFEBEE', 'align': 'left'})
                     for c_idx, col_n in enumerate(summary.columns): ws.write(1, start_col_sum + c_idx, col_n, sum_head_f)
                     
@@ -178,4 +181,4 @@ if uploaded_file:
                     for i, col in enumerate(summary.columns):
                         ws.set_column(start_col_sum + i, start_col_sum + i, 15)
 
-            st.download_button(f"📥 下載 V14.4.0 穩定除錯版", output_excel.getvalue(), "化石先生報告.xlsx")
+            st.download_button(f"📥 下載 V14.4.1 藍色溯源版", output_excel.getvalue(), "化石先生報告.xlsx")
