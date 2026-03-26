@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from PIL import Image
 
-# V14.6.0 雲端品牌旗艦版：摘要術語精確化 + 新增「總實際工時」計算 + 排班異常診斷
+# V14.6.1 雲端品牌旗艦版：修復渲染 TypeError + 摘要術語精確化 + 新增總實際工時
 st.set_page_config(page_title="化石先生：雲端工時分析系統", layout="wide")
 
 def display_header():
@@ -18,12 +18,12 @@ def display_header():
         except Exception:
             st.error("📷 Logo 遺失")
     with col_title:
-        st.title("化石先生：雲端工時分析系統 (V14.6.0)")
+        st.title("化石先生：雲端工時分析系統 (V14.6.1)")
     st.markdown("---")
 
 display_header()
 
-def process_data_v14_6_0(file):
+def process_data_v14_6_1(file):
     shift_rules = {
         'A': ('09:30', '17:30'), 'B': ('13:00', '21:00'), 'B2': ('14:00', '22:00'),
         'C': ('12:00', '20:30'), 'All': ('09:30', '21:00'), 'All2': ('09:30', '22:00')
@@ -109,7 +109,7 @@ if uploaded_file:
         m_time = "無法讀取"
 
     if st.button("🚀 啟動衛星連線分析"):
-        month_dict, shift_rules = process_data_v14_6_0(uploaded_file) 
+        month_dict, shift_rules = process_data_v14_6_1(uploaded_file) 
         if not month_dict:
             st.error("❌ 檔案相容性異常。")
         else:
@@ -130,7 +130,7 @@ if uploaded_file:
                     for c_idx, val in enumerate(row_vals): ws_shift.write(r_idx + 1, c_idx, val, bold_border_f)
                 ws_shift.set_column(0, 2, 20)
 
-                # 2. 排班確認表
+                # 2. 排班確認表 (包含異常診斷)
                 all_confirm_data = []
                 p_colors = [{'text': '#0000FF', 'bg': '#E1F5FE'}, {'text': '#008000', 'bg': '#E8F5E9'}, {'text': '#800080', 'bg': '#F3E5F5'}, {'text': '#FF8C00', 'bg': '#FFF3E0'}, {'text': '#008080', 'bg': '#E0F2F1'}, {'text': '#A52A2A', 'bg': '#EFEBE9'}, {'text': '#2F4F4F', 'bg': '#ECEFF1'}]
                 
@@ -140,13 +140,11 @@ if uploaded_file:
                     active_duty = data[~data['_is_off']].copy()
                     c_df = active_duty.groupby('日期').agg({'星期': 'first', '人員': lambda x: ",".join(x), '出勤計算': 'sum'}).reset_index()
                     c_df['月份'] = clean_m
-                    
                     def diagnosis_confirm(row):
                         is_we = row['星期'] in ['週六', '週日']
                         count = row['出勤計算']
                         if is_we: return ("正常", "") if 3 <= count <= 4 else ("異常", "假日人數應為 3-4 人")
                         else: return ("正常", "") if 2 <= count <= 3 else ("異常", "平日人數應為 2-3 人")
-                    
                     res = c_df.apply(diagnosis_confirm, axis=1)
                     c_df['排班人數確認'] = [r[0] for r in res]; c_df['備註'] = [r[1] for r in res]
                     all_confirm_data.append(c_df)
@@ -156,13 +154,11 @@ if uploaded_file:
                 total_confirm_df = total_confirm_df.reindex(columns=['月份', '日期', '平日/假日', '當天人數', '人員', '排班人數確認', '備註'])
 
                 total_confirm_df.to_excel(writer, index=False, sheet_name='排班確認表', startrow=1)
-                ws_c = writer.sheets['排班確認表']
-                ws_c.freeze_panes(2, 0)
+                ws_c = writer.sheets['排班確認表']; ws_c.freeze_panes(2, 0)
                 rule_t = "排班表規則:平日2-3人；假日3~4人；排班規則早1晚2(2A2B) 或1A2B1C"
                 ws_c.merge_range(0, 0, 0, 6, f"{rule_t}  |  原始檔名：{f_name_raw}  |  修改時間：{m_time}", info_f)
                 ws_c.autofilter(1, 0, len(total_confirm_df)+1, len(total_confirm_df.columns)-1)
                 for c_idx, col in enumerate(total_confirm_df.columns): ws_c.write(1, c_idx, col, head_f)
-                
                 for r_idx, row_c in total_confirm_df.iterrows():
                     is_we = row_c['平日/假日'] in ['週六', '週日']
                     is_m_end = (r_idx < len(total_confirm_df)-1) and (total_confirm_df.iloc[r_idx+1]['月份'] != row_c['月份'])
@@ -179,12 +175,10 @@ if uploaded_file:
                 # 3. 明細+摘要 頁面
                 for m_name, data in month_dict.items():
                     safe_m = str(m_name)[:15] + "_明細+摘要"
-                    # --- V14.6.0 更新：摘要術語更名與新欄位計算 ---
                     summary = data.groupby('人員').agg({'出勤計算': 'sum', '當日工時': 'sum', '休息時間/用餐': 'sum', '加班': 'sum'}).reset_index()
+                    # --- V14.6.1 更新：摘要術語更名與新欄位計算 ---
                     summary.rename(columns={'出勤計算': '總工作天數', '當日工時': '當月總工時', '休息時間/用餐': '總休息時間', '加班': '總加班時數'}, inplace=True)
-                    # 計算「總實際工時」
                     summary['總實際工時'] = summary['當月總工時'] - summary['總休息時間']
-                    # 重新排列摘要欄位：總工作天數, 當月總工時, 總休息時間, 總加班時數, 總實際工時
                     summary = summary.reindex(columns=['人員', '總工作天數', '當月總工時', '總休息時間', '總加班時數', '總實際工時'])
                     
                     p_color_map = {p: p_colors[i % len(p_colors)] for i, p in enumerate(data['人員'].unique())}
@@ -220,11 +214,13 @@ if uploaded_file:
                         for c_idx, col_n in enumerate(summary.columns):
                             v_s = row_s[col_n]; s_fmt = {'border': 1, 'num_format': '0.0', 'align': 'left', 'valign': 'vcenter'}
                             if col_n == '人員': s_fmt['font_color'] = c_sets_s['text']; s_fmt['bg_color'] = c_sets_s['bg']
-                            elif col_n == '總加班時數': s_fmt['font_color'] = '#FF0000'; s_fmt['bold'] = (v_s > 20.0); s_fmt['bg_color'] = '#FF0000' if v_s > 20.0 else None; s_fmt['font_color'] = '#FFFFFF' if v_s > 20.0 else '#FF0000'
+                            elif col_n == '總加班時數': s_fmt['bold'] = (v_s > 20.0); s_fmt['bg_color'] = '#FF0000' if v_s > 20.0 else '#FFFFFF'; s_fmt['font_color'] = '#FFFFFF' if v_s > 20.0 else '#FF0000'
                             elif col_n == '總實際工時': s_fmt['bold'] = True; s_fmt['bg_color'] = '#E8F5E9'
+                            # --- V14.6.1 修正：確保背景顏色不為 None 以防崩潰 ---
+                            if 'bg_color' not in s_fmt or s_fmt['bg_color'] is None: s_fmt['bg_color'] = '#FFFFFF'
                             ws.write(r_idx + 2, start_col_sum + c_idx, v_s, wb.add_format(s_fmt))
                     
                     for i, col in enumerate(cols_d): ws.set_column(i, i, 40 if col == '備註' else 15)
                     for i, col in enumerate(summary.columns): ws.set_column(start_col_sum + i, start_col_sum + i, 15)
 
-            st.download_button(f"📥 下載系統報告", output_excel.getvalue(), final_filename)
+            st.download_button(f"📥 下載修正穩定版", output_excel.getvalue(), final_filename)
