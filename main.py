@@ -5,7 +5,7 @@ import openpyxl
 from datetime import datetime
 from PIL import Image
 
-# V14.2.9 雲端品牌旗艦版：全面休假紅底強化 + 班次自動校準 + 週末加乘高亮
+# V14.3.0 雲端品牌旗艦版：預設開啟「自動篩選」+ 班次核對邏輯 + 休假全紅底強化
 st.set_page_config(page_title="化石先生：雲端工時分析系統", layout="wide")
 
 # --- UI 品牌頭部設定 ---
@@ -18,13 +18,13 @@ def display_header():
         except Exception:
             st.error("📷 Logo 檔案未讀取到")
     with col_title:
-        st.title("化石先生：雲端工時分析系統 (V14.2.9)")
+        st.title("化石先生：雲端工時分析系統 (V14.3.0)")
     st.markdown("---")
 
 display_header()
 
-def process_data_v14_2_9(file):
-    # 定義班次核對規則
+def process_data_v14_3_0(file):
+    # 定義班次核對表規則
     shift_rules = {
         'A': ('09:30', '17:30'),
         'B': ('13:00', '21:00'),
@@ -69,7 +69,6 @@ def process_data_v14_2_9(file):
                             shift = str(rows.iloc[idx, col_idx]).strip()
                             
                             if shift != "nan" or work_h > 0:
-                                # 階梯式休息判定
                                 if work_h < 4.0: rest_h = 0.0
                                 elif 4.0 <= work_h <= 8.0: rest_h = 0.5
                                 else: rest_h = 1.0
@@ -83,7 +82,7 @@ def process_data_v14_2_9(file):
                                 weekday_str = f"週{['一','二','三','四','五','六','日'][dt_obj.weekday()]}"
                                 is_weekend = weekday_str in ['週六', '週日']
                                 
-                                # 班次核對狀態
+                                # 班次核對邏輯
                                 check_status = "-" if is_off else "班次錯誤"
                                 if not is_off and shift in shift_rules:
                                     rule_start, rule_end = shift_rules[shift]
@@ -103,13 +102,9 @@ def process_data_v14_2_9(file):
                                     '實際產出工時': actual_h_str, '加班': over_h,
                                     '備註': str(rows.iloc[idx+5, col_idx]).strip() if pd.notnull(rows.iloc[idx+5, col_idx]) else "",
                                     '出勤計算': 1 if (not is_off and work_h > 0) else 0,
-                                    '_is_weekend': is_weekend,
-                                    '_is_off': is_off
+                                    '_is_weekend': is_weekend, '_is_off': is_off
                                 })
                         except: pass
-                    
-                    total_work_h = sum(r['當日工時'] for r in person_records)
-                    for r in person_records: r['月總工時'] = round(total_work_h, 1)
                     all_records.extend(person_records)
                     idx += 6 
                 else: idx += 1
@@ -122,7 +117,7 @@ uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
 if uploaded_file:
     if st.button("🚀 啟動衛星連線分析"):
-        result = process_data_v14_2_9(uploaded_file)
+        result = process_data_v14_3_0(uploaded_file)
         if result == "INCOMPATIBLE":
             st.error("❌ 檔案相容性異常。")
         else:
@@ -141,58 +136,52 @@ if uploaded_file:
                     
                     # --- 明細頁 ---
                     sheet_d = f"{safe_m}_明細"
-                    cols_d = ['人員', '日期', '星期', '班次', '班次核對', '上班', '下班', '當日工時', '休息時間/用餐', '實際產出工時', '加班', '月總工時', '備註']
+                    cols_d = ['人員', '日期', '星期', '班次', '班次核對', '上班', '下班', '當日工時', '休息時間/用餐', '實際產出工時', '加班', '備註']
                     data[cols_d].to_excel(writer, index=False, sheet_name=sheet_d)
                     ws_d = writer.sheets[sheet_d]
-                    for c_idx, col_n in enumerate(cols_d): ws_d.write(0, c_idx, col_n, head_f)
                     
+                    # --- V14.3.0 新增：開啟篩選功能 ---
+                    ws_d.autofilter(0, 0, len(data), len(cols_d)-1) 
+                    
+                    for c_idx, col_n in enumerate(cols_d): ws_d.write(0, c_idx, col_n, head_f)
                     for r_idx, row in data.iterrows():
                         c_sets = p_color_map.get(row['人員'])
-                        is_person_boundary = (r_idx == len(data) - 1) or (data.iloc[r_idx + 1]['人員'] != row['人員'])
-                        
+                        is_boundary = (r_idx == len(data)-1) or (data.iloc[r_idx+1]['人員'] != row['人員'])
                         for c_idx, col_n in enumerate(cols_d):
                             val = row[col_n]
-                            fmt_dict = {'border': 1, 'align': 'left'}
-                            if is_person_boundary: fmt_dict['bottom'] = 2
-                            
+                            fmt = {'border': 1, 'align': 'left'}
+                            if is_boundary: fmt['bottom'] = 2
                             if col_n == '人員':
-                                fmt_dict['font_color'] = c_sets['text']; fmt_dict['bg_color'] = c_sets['bg']
+                                fmt['font_color'] = c_sets['text']; fmt['bg_color'] = c_sets['bg']
                             elif row['_is_off']:
-                                # --- V14.2.9 更新：休假一律紅底 ---
-                                fmt_dict['bg_color'] = '#FF0000'
-                                fmt_dict['font_color'] = '#000000'
+                                fmt['bg_color'] = '#FF0000'; fmt['font_color'] = '#000000'
                             elif col_n == '班次核對':
-                                fmt_dict['bold'] = True
-                                if val == "班次正確": fmt_dict['font_color'] = '#008000'
-                                elif val == "班次錯誤": fmt_dict['font_color'] = '#FF0000'
+                                fmt['bold'] = True
+                                fmt['font_color'] = '#008000' if val == "班次正確" else '#FF0000'
                             elif col_n == '實際產出工時' and row['_is_weekend']:
-                                fmt_dict['bg_color'] = '#FFE0B2'; fmt_dict['bold'] = True; fmt_dict['font_color'] = '#E65100'
-                            elif col_n == '加班':
-                                fmt_dict['font_color'] = '#FF0000'
-                            elif col_n == '星期' and row['_is_weekend']:
-                                fmt_dict['font_color'] = '#FF0000'; fmt_dict['bold'] = True
-                            
-                            ws_d.write(r_idx + 1, c_idx, val, wb.add_format(fmt_dict))
-                    ws_d.set_column('A:M', 15)
+                                fmt['bg_color'] = '#FFE0B2'; fmt['bold'] = True; fmt_font = '#E65100'
+                            elif col_n == '加班' or (col_n == '星期' and row['_is_weekend']):
+                                fmt['font_color'] = '#FF0000'; fmt['bold'] = (col_n == '星期')
+                            ws_d.write(r_idx + 1, c_idx, val, wb.add_format(fmt))
+                    ws_d.set_column('A:L', 15)
                     
                     # --- 摘要頁 ---
                     sheet_s = f"{safe_m}_摘要"
                     summary.to_excel(writer, index=False, sheet_name=sheet_s)
                     ws_s = writer.sheets[sheet_s]
-                    for c_idx, col_n in enumerate(summary.columns): ws_s.write(0, c_idx, col_n, head_f)
+                    ws_s.autofilter(0, 0, len(summary), len(summary.columns)-1)
+                    for c_idx, col in enumerate(summary.columns): ws_s.write(0, c_idx, col, head_f)
                     for r_idx, row_s in summary.iterrows():
                         c_sets_s = p_color_map.get(row_s['人員'])
                         for c_idx, col_n in enumerate(summary.columns):
                             val_s = row_s[col_n]
-                            sum_fmt = {'border': 1, 'num_format': '0.0', 'align': 'left'}
+                            s_fmt = {'border': 1, 'num_format': '0.0', 'align': 'left'}
                             if col_n == '人員':
-                                sum_fmt['font_color'] = c_sets_s['text']; sum_fmt['bg_color'] = c_sets_s['bg']
+                                s_fmt['font_color'] = c_sets_s['text']; s_fmt['bg_color'] = c_sets_s['bg']
                             elif col_n == '加班':
-                                if val_s > 20.0:
-                                    sum_fmt['bg_color'] = '#FF0000'; sum_fmt['font_color'] = '#FFFFFF'; sum_fmt['bold'] = True
-                                else:
-                                    sum_fmt['font_color'] = '#FF0000'
-                            ws_s.write(r_idx + 1, c_idx, val_s, wb.add_format(sum_fmt))
+                                if val_s > 20.0: s_fmt['bg_color'] = '#FF0000'; s_fmt['font_color'] = '#FFFFFF'; s_fmt['bold'] = True
+                                else: s_fmt['font_color'] = '#FF0000'
+                            ws_s.write(r_idx + 1, c_idx, val_s, wb.add_format(s_fmt))
                     ws_s.set_column('A:E', 15)
 
-            st.download_button("📥 下載 V14.2.9 終極紅區版", output_excel.getvalue(), "化石先生報告.xlsx")
+            st.download_button("📥 下載 V14.3.0 自動篩選版", output_excel.getvalue(), "化石先生報告.xlsx")
