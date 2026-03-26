@@ -5,7 +5,7 @@ import openpyxl
 from datetime import datetime
 from PIL import Image
 
-# V14.4.2 雲端品牌旗艦版：移除介面監控標語 + 全字元藍色顯示 + 報表首行溯源
+# V14.4.3 雲端品牌旗艦版：對照表標題黃色填滿 + 全粗框線 + 介面藍色資訊強化
 st.set_page_config(page_title="化石先生：雲端工時分析系統", layout="wide")
 
 def display_header():
@@ -17,12 +17,12 @@ def display_header():
         except Exception:
             st.error("📷 Logo 遺失")
     with col_title:
-        st.title("化石先生：雲端工時分析系統 (V14.4.2)")
+        st.title("化石先生：雲端工時分析系統 (V14.4.3)")
     st.markdown("---")
 
 display_header()
 
-def process_data_v14_4_2(file):
+def process_data_v14_4_3(file):
     shift_rules = {
         'A': ('09:30', '17:30'), 'B': ('13:00', '21:00'), 'B2': ('14:00', '22:00'),
         'C': ('12:00', '20:30'), 'All': ('09:30', '21:00'), 'All2': ('09:30', '22:00')
@@ -96,7 +96,6 @@ if uploaded_file:
         m_time = meta.modified.strftime("%Y/%m/%d %H:%M:%S") if meta.modified else "無法讀取"
         e_time = meta.created.strftime("%Y/%m/%d %H:%M:%S") if meta.created else "無法讀取"
         
-        # --- V14.4.2 更新：移除標語，僅保留核心藍色資訊 ---
         st.markdown(f"""
         <div style="background-color: #F0F2F6; padding: 15px; border-radius: 10px; border-left: 5px solid #0000FF; margin-bottom: 20px;">
             <p style="color: #0000FF; font-size: 1.1em; margin-bottom: 5px;"><b>原始檔名：</b>{f_name}</p>
@@ -108,7 +107,7 @@ if uploaded_file:
         m_time, e_time = "無法讀取", "無法讀取"
 
     if st.button("🚀 啟動衛星連線分析"):
-        month_dict, shift_rules = process_data_v14_4_2(uploaded_file)
+        month_dict, shift_rules = process_data_v14_4_3(uploaded_file)
         if not month_dict:
             st.error("❌ 檔案相容性異常。")
         else:
@@ -118,11 +117,23 @@ if uploaded_file:
                 head_f = wb.add_format({'bold': 1, 'font_color': 'blue', 'border': 1, 'align': 'left', 'valign': 'vcenter'})
                 info_f = wb.add_format({'bold': 1, 'font_color': '#FFFFFF', 'bg_color': '#0000FF', 'align': 'left'})
                 
+                # --- V14.4.3 更新：班次對照表 (標題黃底 + 全粗框線) ---
                 shift_df = pd.DataFrame([{'班次': k, '上班': v[0], '下班': v[1]} for k, v in shift_rules.items()])
                 shift_df.to_excel(writer, index=False, sheet_name='班次對照表')
                 ws_shift = writer.sheets['班次對照表']
-                for c_idx, col in enumerate(shift_df.columns): ws_shift.write(0, c_idx, col, head_f)
-                ws_shift.set_column(0, 2, 15)
+                
+                # 建立黃底與粗框線格式
+                yellow_head_f = wb.add_format({'bold': 1, 'font_color': 'blue', 'bg_color': 'yellow', 'border': 2, 'align': 'left'})
+                bold_border_f = wb.add_format({'border': 2, 'align': 'left'})
+                
+                for c_idx, col in enumerate(shift_df.columns): 
+                    ws_shift.write(0, c_idx, col, yellow_head_f)
+                
+                for r_idx, row_vals in enumerate(shift_df.values):
+                    for c_idx, val in enumerate(row_vals):
+                        ws_shift.write(r_idx + 1, c_idx, val, bold_border_f)
+                
+                ws_shift.set_column(0, 2, 20)
 
                 p_colors = [{'text': '#0000FF', 'bg': '#E1F5FE'}, {'text': '#008000', 'bg': '#E8F5E9'}, {'text': '#800080', 'bg': '#F3E5F5'}, {'text': '#FF8C00', 'bg': '#FFF3E0'}, {'text': '#008080', 'bg': '#E0F2F1'}, {'text': '#A52A2A', 'bg': '#EFEBE9'}, {'text': '#2F4F4F', 'bg': '#ECEFF1'}]
                 
@@ -141,6 +152,7 @@ if uploaded_file:
                     
                     ws.autofilter(1, 0, len(data)+1, len(cols_d)-1) 
                     for c_idx, col_n in enumerate(cols_d): ws.write(1, c_idx, col_n, head_f)
+                    
                     sum_head_f = wb.add_format({'bold': 1, 'font_color': '#800000', 'border': 1, 'bg_color': '#FFEBEE', 'align': 'left'})
                     for c_idx, col_n in enumerate(summary.columns): ws.write(1, start_col_sum + c_idx, col_n, sum_head_f)
                     
@@ -177,4 +189,4 @@ if uploaded_file:
                     for i, col in enumerate(summary.columns):
                         ws.set_column(start_col_sum + i, start_col_sum + i, 15)
 
-            st.download_button(f"📥 下載 V14.4.2 簡潔溯源版", output_excel.getvalue(), "化石先生報告.xlsx")
+            st.download_button(f"📥 下載 V14.4.3 規格裝甲版", output_excel.getvalue(), "化石先生報告.xlsx")
