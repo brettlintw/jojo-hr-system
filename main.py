@@ -5,7 +5,7 @@ import openpyxl
 from datetime import datetime
 from PIL import Image
 
-# V14.3.8 雲端品牌旗艦版：明細+摘要併位版 + 分頁更名 + 精密排版校準
+# V14.4.0 雲端品牌旗艦版：修復首行時間戳記崁入 + 明細摘要整合 + 全欄位安全排版
 st.set_page_config(page_title="化石先生：雲端工時分析系統", layout="wide")
 
 def display_header():
@@ -15,14 +15,14 @@ def display_header():
             img = Image.open('rsz_mrfossillogo_20190422182824.png')
             st.image(img, width=150)
         except Exception:
-            st.error("📷 Logo 檔案未讀取到")
+            st.error("📷 Logo 遺失")
     with col_title:
-        st.title("化石先生：雲端工時分析系統 (V14.3.8)")
+        st.title("化石先生：雲端工時分析系統 (V14.4.0)")
     st.markdown("---")
 
 display_header()
 
-def process_data_v14_3_8(file):
+def process_data_v14_4_0(file):
     shift_rules = {
         'A': ('09:30', '17:30'), 'B': ('13:00', '21:00'), 'B2': ('14:00', '22:00'),
         'C': ('12:00', '20:30'), 'All': ('09:30', '21:00'), 'All2': ('09:30', '22:00')
@@ -88,8 +88,23 @@ def process_data_v14_3_8(file):
 uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
 if uploaded_file:
+    f_name = uploaded_file.name
+    try:
+        uploaded_file.seek(0)
+        wb_meta = openpyxl.load_workbook(uploaded_file, read_only=True)
+        meta = wb_meta.properties
+        m_time = meta.modified.strftime("%Y/%m/%d %H:%M:%S") if meta.modified else "無法讀取"
+        e_time = meta.created.strftime("%Y/%m/%d %H:%M:%S") if meta.created else "無法讀取"
+        st.success(f"📡 檔案掃描成功！")
+        c1, c2, c3 = st.columns(3)
+        with c1: st.metric("原始檔名", f_name)
+        with c2: st.metric("最後修改時間", m_time)
+        with c3: st.metric("上次編輯時間", e_time)
+    except:
+        m_time, e_time = "無法讀取", "無法讀取"
+
     if st.button("🚀 啟動衛星連線分析"):
-        month_dict, shift_rules = process_data_v14_3_8(uploaded_file)
+        month_dict, shift_rules = process_data_v14_4_0(uploaded_file)
         if not month_dict:
             st.error("❌ 檔案相容性異常。")
         else:
@@ -97,44 +112,39 @@ if uploaded_file:
             with pd.ExcelWriter(output_excel, engine='xlsxwriter') as writer:
                 wb = writer.book
                 head_f = wb.add_format({'bold': 1, 'font_color': 'blue', 'border': 1, 'align': 'left', 'valign': 'vcenter'})
+                info_f = wb.add_format({'bold': 1, 'font_color': '#FFFFFF', 'bg_color': '#333333', 'align': 'left'})
                 
-                # --- 班次對照表 (粗框線) ---
+                # --- 班次對照表 ---
                 shift_df = pd.DataFrame([{'班次': k, '上班': v[0], '下班': v[1]} for k, v in shift_rules.items()])
                 shift_df.to_excel(writer, index=False, sheet_name='班次對照表')
                 ws_shift = writer.sheets['班次對照表']
                 bold_border_f = wb.add_format({'border': 2, 'align': 'left'})
                 for c_idx, col in enumerate(shift_df.columns): ws_shift.write(0, c_idx, col, head_f)
-                for r_idx, row_s in enumerate(shift_df.values):
-                    for c_idx, val_s in enumerate(row_s): ws_shift.write(r_idx + 1, c_idx, val_s, bold_border_f)
-                for i, col in enumerate(shift_df.columns):
-                    ws_shift.set_column(i, i, max(shift_df[col].astype(str).map(len).max(), len(col)) + 4)
+                for r_idx, row_v in enumerate(shift_df.values):
+                    for c_idx, v in enumerate(row_v): ws_shift.write(r_idx + 1, c_idx, v, bold_border_f)
+                for i, col in enumerate(shift_df.columns): ws_shift.set_column(i, i, 20)
 
                 p_colors = [{'text': '#0000FF', 'bg': '#E1F5FE'}, {'text': '#008000', 'bg': '#E8F5E9'}, {'text': '#800080', 'bg': '#F3E5F5'}, {'text': '#FF8C00', 'bg': '#FFF3E0'}, {'text': '#008080', 'bg': '#E0F2F1'}, {'text': '#A52A2A', 'bg': '#EFEBE9'}, {'text': '#2F4F4F', 'bg': '#ECEFF1'}]
                 
                 for month, data in month_dict.items():
-                    # --- V14.3.8 更新：分頁名稱合併 ---
                     safe_m = str(month)[:15] + "_明細+摘要"
-                    
                     summary = data.groupby('人員').agg({'出勤計算': 'sum', '當日工時': 'sum', '休息時間/用餐': 'sum', '加班': 'sum'}).reset_index()
                     summary.rename(columns={'出勤計算': '總工作天數', '當日工時': '當月工時'}, inplace=True)
                     p_color_map = {p: p_colors[i % len(p_colors)] for i, p in enumerate(data['人員'].unique())}
                     
-                    # 寫入明細數據
                     cols_d = ['人員', '日期', '星期', '班次', '班次核對', '上班', '下班', '當日工時', '休息時間/用餐', '實際產出工時', '加班', '備註']
-                    data[cols_d].to_excel(writer, index=False, sheet_name=safe_m)
+                    start_col_sum = len(cols_d) + 2
+                    
+                    data[cols_d].to_excel(writer, index=False, sheet_name=safe_m, startrow=1)
                     ws = writer.sheets[safe_m]
-                    ws.autofilter(0, 0, len(data), len(cols_d)-1) 
+                    ws.merge_range(0, 0, 0, start_col_sum + 4, f"原始檔名：{f_name}  |  最後修改時間：{m_time}  |  上次編輯時間：{e_time}", info_f)
                     
-                    # 寫入明細標題格式
-                    for c_idx, col_n in enumerate(cols_d): ws.write(0, c_idx, col_n, head_f)
+                    ws.autofilter(1, 0, len(data)+1, len(cols_d)-1) 
+                    for c_idx, col_n in enumerate(cols_d): ws.write(1, c_idx, col_n, head_f)
                     
-                    # --- V14.3.8 更新：將摘要寫入明細右側 ---
-                    start_col_sum = len(cols_d) + 2 # 留兩個空欄位作為視覺緩衝區
                     sum_head_f = wb.add_format({'bold': 1, 'font_color': '#800000', 'border': 1, 'bg_color': '#FFEBEE', 'align': 'left'})
-                    for c_idx, col_n in enumerate(summary.columns):
-                        ws.write(0, start_col_sum + c_idx, col_n, sum_head_f)
+                    for c_idx, col_n in enumerate(summary.columns): ws.write(1, start_col_sum + c_idx, col_n, sum_head_f)
                     
-                    # 寫入明細行格式與數據
                     for r_idx, row in data.iterrows():
                         c_sets = p_color_map.get(row['人員'])
                         is_bound = (r_idx == len(data)-1) or (data.iloc[r_idx+1]['人員'] != row['人員'])
@@ -149,9 +159,8 @@ if uploaded_file:
                             elif col_n in ['班次', '班次核對']: fmt['bold'] = True; fmt['font_color'] = c_color
                             elif col_n == '實際產出工時' and row['_is_weekend']: fmt['bg_color'] = '#FFE0B2'; fmt['bold'] = True; fmt['font_color'] = '#E65100'
                             elif col_n == '加班' or (col_n == '星期' and row['_is_weekend']): fmt['font_color'] = '#FF0000'; fmt['bold'] = (col_n == '星期')
-                            ws.write(r_idx + 1, c_idx, val, wb.add_format(fmt))
+                            ws.write(r_idx + 2, c_idx, val, wb.add_format(fmt))
 
-                    # 寫入摘要行格式與數據 (從第一行開始)
                     for r_idx, row_s in summary.iterrows():
                         c_sets_s = p_color_map.get(row_s['人員'])
                         for c_idx, col_n in enumerate(summary.columns):
@@ -161,14 +170,12 @@ if uploaded_file:
                             elif col_n == '加班':
                                 if v_s > 20.0: s_fmt['bg_color'] = '#FF0000'; s_fmt['font_color'] = '#FFFFFF'; s_fmt['bold'] = True
                                 else: s_fmt['font_color'] = '#FF0000'
-                            ws.write(r_idx + 1, start_col_sum + c_idx, v_s, wb.add_format(s_fmt))
+                            ws.write(r_idx + 2, start_col_sum + c_idx, v_s, wb.add_format(s_fmt))
 
-                    # 自動適配寬度
                     for i, col in enumerate(cols_d):
                         w = 40 if col == '備註' else max(data[col].astype(str).map(len).max(), len(col)) + 6
                         ws.set_column(i, i, w)
                     for i, col in enumerate(summary.columns):
-                        w = max(summary[col].astype(str).map(len).max(), len(col)) + 5
-                        ws.set_column(start_col_sum + i, start_col_sum + i, w)
+                        ws.set_column(start_col_sum + i, start_col_sum + i, 15)
 
-            st.download_button(f"📥 下載 V14.3.8 明細+摘要整合版", output_excel.getvalue(), "化石先生報告.xlsx")
+            st.download_button(f"📥 下載 V14.4.0 穩定除錯版", output_excel.getvalue(), "化石先生報告.xlsx")
