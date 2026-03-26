@@ -5,7 +5,7 @@ import openpyxl
 from datetime import datetime
 from PIL import Image
 
-# V14.2.7 雲端品牌旗艦版：新增「班次核對」欄位 + 班次比對規則 + 視覺自動校準
+# V14.2.8 雲端品牌旗艦版：休假核對歸零 + 休假視覺同步 + 班次自動校準
 st.set_page_config(page_title="化石先生：雲端工時分析系統", layout="wide")
 
 # --- UI 品牌頭部設定 ---
@@ -18,13 +18,13 @@ def display_header():
         except Exception:
             st.error("📷 Logo 檔案未讀取到")
     with col_title:
-        st.title("化石先生：雲端工時分析系統 (V14.2.7)")
+        st.title("化石先生：雲端工時分析系統 (V14.2.8)")
     st.markdown("---")
 
 display_header()
 
-def process_data_v14_2_7(file):
-    # 定義班次核對表規則
+def process_data_v14_2_8(file):
+    # 定義班次核對表規則 (A, B, B2, C, All, All2)
     shift_rules = {
         'A': ('09:30', '17:30'),
         'B': ('13:00', '21:00'),
@@ -81,16 +81,19 @@ def process_data_v14_2_7(file):
                                 end_t = "-" if is_off else str(rows.iloc[idx+2, col_idx]).strip()[:5]
                                 dt_obj = pd.to_datetime(target_date)
                                 weekday_str = f"週{['一','二','三','四','五','六','日'][dt_obj.weekday()]}"
+                                is_weekend = weekday_str in ['週六', '週日']
                                 
-                                # --- V14.2.7 新增：班次核對邏輯 ---
-                                check_status = "班次錯誤"
-                                if not is_off and shift in shift_rules:
-                                    rule_start, rule_end = shift_rules[shift]
-                                    if start_t == rule_start and end_t == rule_end:
-                                        check_status = "班次正確"
+                                # --- V14.2.8 更新：休假核對邏輯 ---
+                                if is_off:
+                                    check_status = "-"
+                                else:
+                                    check_status = "班次錯誤"
+                                    if shift in shift_rules:
+                                        rule_start, rule_end = shift_rules[shift]
+                                        if start_t == rule_start and end_t == rule_end:
+                                            check_status = "班次正確"
                                 
                                 actual_h_str = str(actual_h)
-                                is_weekend = weekday_str in ['週六', '週日']
                                 if is_weekend and not is_off and work_h > 0:
                                     actual_h_str = f"{actual_h} (加乘)"
 
@@ -103,7 +106,8 @@ def process_data_v14_2_7(file):
                                     '實際產出工時': actual_h_str, '加班': over_h,
                                     '備註': str(rows.iloc[idx+5, col_idx]).strip() if pd.notnull(rows.iloc[idx+5, col_idx]) else "",
                                     '出勤計算': 1 if (not is_off and work_h > 0) else 0,
-                                    '_is_weekend': is_weekend
+                                    '_is_weekend': is_weekend,
+                                    '_is_off': is_off
                                 })
                         except: pass
                     
@@ -120,17 +124,8 @@ def process_data_v14_2_7(file):
 uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
 if uploaded_file:
-    try:
-        uploaded_file.seek(0)
-        wb_prop = openpyxl.load_workbook(uploaded_file, read_only=True)
-        props = wb_prop.properties
-        m_time = props.modified.strftime("%Y/%m/%d %H:%M:%S") if props.modified else "Unknown"
-        st.success(f"📡 檔案掃描成功！ 最後修改：{m_time}")
-        uploaded_file.seek(0)
-    except: pass
-
     if st.button("🚀 啟動衛星連線分析"):
-        result = process_data_v14_2_7(uploaded_file)
+        result = process_data_v14_2_8(uploaded_file)
         if result == "INCOMPATIBLE":
             st.error("❌ 檔案相容性異常。")
         else:
@@ -147,7 +142,7 @@ if uploaded_file:
                     summary.rename(columns={'出勤計算': '總工作天數', '當日工時': '當月工時'}, inplace=True)
                     p_color_map = {p: p_colors[i % len(p_colors)] for i, p in enumerate(data['人員'].unique())}
                     
-                    # --- 明細頁 (包含班次核對視覺化) ---
+                    # --- 明細頁 ---
                     sheet_d = f"{safe_m}_明細"
                     cols_d = ['人員', '日期', '星期', '班次', '班次核對', '上班', '下班', '當日工時', '休息時間/用餐', '實際產出工時', '加班', '月總工時', '備註']
                     data[cols_d].to_excel(writer, index=False, sheet_name=sheet_d)
@@ -155,7 +150,6 @@ if uploaded_file:
                     for c_idx, col_n in enumerate(cols_d): ws_d.write(0, c_idx, col_n, head_f)
                     
                     for r_idx, row in data.iterrows():
-                        is_off = (str(row['班次']).strip() == "休")
                         c_sets = p_color_map.get(row['人員'])
                         is_person_boundary = (r_idx == len(data) - 1) or (data.iloc[r_idx + 1]['人員'] != row['人員'])
                         
@@ -166,14 +160,18 @@ if uploaded_file:
                             
                             if col_n == '人員':
                                 fmt_dict['font_color'] = c_sets['text']; fmt_dict['bg_color'] = c_sets['bg']
+                            elif row['_is_off']:
+                                # --- V14.2.8 更新：休假背景與週末規則同步 ---
+                                if row['_is_weekend']:
+                                    fmt_dict['bg_color'] = '#FFE0B2' # 週末橘色背景
+                                else:
+                                    fmt_dict['bg_color'] = '#FF0000' # 平日休假紅底
+                                fmt_dict['font_color'] = '#000000'
                             elif col_n == '班次核對':
-                                # --- V14.2.7 新增：核對字體顏色與粗體 ---
                                 fmt_dict['bold'] = True
-                                if val == "班次正確": fmt_dict['font_color'] = '#008000' # 綠色
-                                else: fmt_dict['font_color'] = '#FF0000' # 紅色
-                            elif is_off:
-                                fmt_dict['bg_color'] = '#FF0000'; fmt_dict['font_color'] = '#000000'
-                            elif col_n == '實際產出工時' and row['_is_weekend'] and not is_off:
+                                if val == "班次正確": fmt_dict['font_color'] = '#008000'
+                                elif val == "班次錯誤": fmt_dict['font_color'] = '#FF0000'
+                            elif col_n == '實際產出工時' and row['_is_weekend']:
                                 fmt_dict['bg_color'] = '#FFE0B2'; fmt_dict['bold'] = True; fmt_dict['font_color'] = '#E65100'
                             elif col_n == '加班':
                                 fmt_dict['font_color'] = '#FF0000'
@@ -203,4 +201,4 @@ if uploaded_file:
                             ws_s.write(r_idx + 1, c_idx, val_s, wb.add_format(sum_fmt))
                     ws_s.set_column('A:E', 15)
 
-            st.download_button("📥 下載 V14.2.7 班次核對版", output_excel.getvalue(), "化石先生報告.xlsx")
+            st.download_button("📥 下載 V14.2.8 視覺同步版", output_excel.getvalue(), "化石先生報告.xlsx")
