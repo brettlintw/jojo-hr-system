@@ -5,7 +5,7 @@ import openpyxl
 from datetime import datetime
 from PIL import Image
 
-# V14.3.7 雲端品牌旗艦版：全欄位安全邊界校準 + 備註自動換行 + 班次顏色連動
+# V14.3.8 雲端品牌旗艦版：明細+摘要併位版 + 分頁更名 + 精密排版校準
 st.set_page_config(page_title="化石先生：雲端工時分析系統", layout="wide")
 
 def display_header():
@@ -17,12 +17,12 @@ def display_header():
         except Exception:
             st.error("📷 Logo 檔案未讀取到")
     with col_title:
-        st.title("化石先生：雲端工時分析系統 (V14.3.7)")
+        st.title("化石先生：雲端工時分析系統 (V14.3.8)")
     st.markdown("---")
 
 display_header()
 
-def process_data_v14_3_7(file):
+def process_data_v14_3_8(file):
     shift_rules = {
         'A': ('09:30', '17:30'), 'B': ('13:00', '21:00'), 'B2': ('14:00', '22:00'),
         'C': ('12:00', '20:30'), 'All': ('09:30', '21:00'), 'All2': ('09:30', '22:00')
@@ -89,7 +89,7 @@ uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
 if uploaded_file:
     if st.button("🚀 啟動衛星連線分析"):
-        month_dict, shift_rules = process_data_v14_3_7(uploaded_file)
+        month_dict, shift_rules = process_data_v14_3_8(uploaded_file)
         if not month_dict:
             st.error("❌ 檔案相容性異常。")
         else:
@@ -112,18 +112,29 @@ if uploaded_file:
                 p_colors = [{'text': '#0000FF', 'bg': '#E1F5FE'}, {'text': '#008000', 'bg': '#E8F5E9'}, {'text': '#800080', 'bg': '#F3E5F5'}, {'text': '#FF8C00', 'bg': '#FFF3E0'}, {'text': '#008080', 'bg': '#E0F2F1'}, {'text': '#A52A2A', 'bg': '#EFEBE9'}, {'text': '#2F4F4F', 'bg': '#ECEFF1'}]
                 
                 for month, data in month_dict.items():
-                    safe_m = str(month)[:25]
+                    # --- V14.3.8 更新：分頁名稱合併 ---
+                    safe_m = str(month)[:15] + "_明細+摘要"
+                    
                     summary = data.groupby('人員').agg({'出勤計算': 'sum', '當日工時': 'sum', '休息時間/用餐': 'sum', '加班': 'sum'}).reset_index()
                     summary.rename(columns={'出勤計算': '總工作天數', '當日工時': '當月工時'}, inplace=True)
                     p_color_map = {p: p_colors[i % len(p_colors)] for i, p in enumerate(data['人員'].unique())}
                     
-                    # --- 明細頁 (精密安全寬度 + 備註自動換行) ---
-                    sheet_d = f"{safe_m}_明細"
+                    # 寫入明細數據
                     cols_d = ['人員', '日期', '星期', '班次', '班次核對', '上班', '下班', '當日工時', '休息時間/用餐', '實際產出工時', '加班', '備註']
-                    data[cols_d].to_excel(writer, index=False, sheet_name=sheet_d)
-                    ws_d = writer.sheets[sheet_d]
-                    ws_d.autofilter(0, 0, len(data), len(cols_d)-1) 
+                    data[cols_d].to_excel(writer, index=False, sheet_name=safe_m)
+                    ws = writer.sheets[safe_m]
+                    ws.autofilter(0, 0, len(data), len(cols_d)-1) 
                     
+                    # 寫入明細標題格式
+                    for c_idx, col_n in enumerate(cols_d): ws.write(0, c_idx, col_n, head_f)
+                    
+                    # --- V14.3.8 更新：將摘要寫入明細右側 ---
+                    start_col_sum = len(cols_d) + 2 # 留兩個空欄位作為視覺緩衝區
+                    sum_head_f = wb.add_format({'bold': 1, 'font_color': '#800000', 'border': 1, 'bg_color': '#FFEBEE', 'align': 'left'})
+                    for c_idx, col_n in enumerate(summary.columns):
+                        ws.write(0, start_col_sum + c_idx, col_n, sum_head_f)
+                    
+                    # 寫入明細行格式與數據
                     for r_idx, row in data.iterrows():
                         c_sets = p_color_map.get(row['人員'])
                         is_bound = (r_idx == len(data)-1) or (data.iloc[r_idx+1]['人員'] != row['人員'])
@@ -133,28 +144,14 @@ if uploaded_file:
                             fmt = {'border': 1, 'align': 'left', 'valign': 'vcenter'}
                             if is_bound: fmt['bottom'] = 2
                             if col_n == '備註': fmt['text_wrap'] = True
-                            
                             if col_n == '人員': fmt['font_color'] = c_sets['text']; fmt['bg_color'] = c_sets['bg']
                             elif row['_is_off']: fmt['bg_color'] = '#FF0000'; fmt['font_color'] = '#000000'
                             elif col_n in ['班次', '班次核對']: fmt['bold'] = True; fmt['font_color'] = c_color
                             elif col_n == '實際產出工時' and row['_is_weekend']: fmt['bg_color'] = '#FFE0B2'; fmt['bold'] = True; fmt['font_color'] = '#E65100'
                             elif col_n == '加班' or (col_n == '星期' and row['_is_weekend']): fmt['font_color'] = '#FF0000'; fmt['bold'] = (col_n == '星期')
-                            ws_d.write(r_idx + 1, c_idx, val, wb.add_format(fmt))
-                    
-                    # 執行 V14.3.7 精密 Auto-Fit
-                    for i, col in enumerate(cols_d):
-                        if col == '備註':
-                            ws_d.set_column(i, i, 40) # 寬度限流，確保垂直換行
-                        else:
-                            # 考慮到中文字元寬度與篩選按鈕遮蓋，增加緩衝值
-                            max_l = max(data[col].astype(str).map(len).max(), len(col)) + 6
-                            ws_d.set_column(i, i, max_l)
-                    
-                    # --- 摘要頁 ---
-                    sheet_s = f"{safe_m}_摘要"
-                    summary.to_excel(writer, index=False, sheet_name=sheet_s)
-                    ws_s = writer.sheets[sheet_s]
-                    ws_s.autofilter(0, 0, len(summary), len(summary.columns)-1)
+                            ws.write(r_idx + 1, c_idx, val, wb.add_format(fmt))
+
+                    # 寫入摘要行格式與數據 (從第一行開始)
                     for r_idx, row_s in summary.iterrows():
                         c_sets_s = p_color_map.get(row_s['人員'])
                         for c_idx, col_n in enumerate(summary.columns):
@@ -164,8 +161,14 @@ if uploaded_file:
                             elif col_n == '加班':
                                 if v_s > 20.0: s_fmt['bg_color'] = '#FF0000'; s_fmt['font_color'] = '#FFFFFF'; s_fmt['bold'] = True
                                 else: s_fmt['font_color'] = '#FF0000'
-                            ws_s.write(r_idx + 1, c_idx, v_s, wb.add_format(s_fmt))
-                    for i, col in enumerate(summary.columns):
-                        ws_s.set_column(i, i, max(summary[col].astype(str).map(len).max(), len(col)) + 5)
+                            ws.write(r_idx + 1, start_col_sum + c_idx, v_s, wb.add_format(s_fmt))
 
-            st.download_button("📥 下載 V14.3.7 精密排版版", output_excel.getvalue(), "化石先生報告.xlsx")
+                    # 自動適配寬度
+                    for i, col in enumerate(cols_d):
+                        w = 40 if col == '備註' else max(data[col].astype(str).map(len).max(), len(col)) + 6
+                        ws.set_column(i, i, w)
+                    for i, col in enumerate(summary.columns):
+                        w = max(summary[col].astype(str).map(len).max(), len(col)) + 5
+                        ws.set_column(start_col_sum + i, start_col_sum + i, w)
+
+            st.download_button(f"📥 下載 V14.3.8 明細+摘要整合版", output_excel.getvalue(), "化石先生報告.xlsx")
