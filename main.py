@@ -5,7 +5,7 @@ import openpyxl
 from datetime import datetime
 from PIL import Image
 
-# V14.2.8 雲端品牌旗艦版：休假核對歸零 + 休假視覺同步 + 班次自動校準
+# V14.2.9 雲端品牌旗艦版：全面休假紅底強化 + 班次自動校準 + 週末加乘高亮
 st.set_page_config(page_title="化石先生：雲端工時分析系統", layout="wide")
 
 # --- UI 品牌頭部設定 ---
@@ -18,13 +18,13 @@ def display_header():
         except Exception:
             st.error("📷 Logo 檔案未讀取到")
     with col_title:
-        st.title("化石先生：雲端工時分析系統 (V14.2.8)")
+        st.title("化石先生：雲端工時分析系統 (V14.2.9)")
     st.markdown("---")
 
 display_header()
 
-def process_data_v14_2_8(file):
-    # 定義班次核對表規則 (A, B, B2, C, All, All2)
+def process_data_v14_2_9(file):
+    # 定義班次核對規則
     shift_rules = {
         'A': ('09:30', '17:30'),
         'B': ('13:00', '21:00'),
@@ -69,7 +69,7 @@ def process_data_v14_2_8(file):
                             shift = str(rows.iloc[idx, col_idx]).strip()
                             
                             if shift != "nan" or work_h > 0:
-                                # 休息時間階梯判定
+                                # 階梯式休息判定
                                 if work_h < 4.0: rest_h = 0.0
                                 elif 4.0 <= work_h <= 8.0: rest_h = 0.5
                                 else: rest_h = 1.0
@@ -83,15 +83,12 @@ def process_data_v14_2_8(file):
                                 weekday_str = f"週{['一','二','三','四','五','六','日'][dt_obj.weekday()]}"
                                 is_weekend = weekday_str in ['週六', '週日']
                                 
-                                # --- V14.2.8 更新：休假核對邏輯 ---
-                                if is_off:
-                                    check_status = "-"
-                                else:
-                                    check_status = "班次錯誤"
-                                    if shift in shift_rules:
-                                        rule_start, rule_end = shift_rules[shift]
-                                        if start_t == rule_start and end_t == rule_end:
-                                            check_status = "班次正確"
+                                # 班次核對狀態
+                                check_status = "-" if is_off else "班次錯誤"
+                                if not is_off and shift in shift_rules:
+                                    rule_start, rule_end = shift_rules[shift]
+                                    if start_t == rule_start and end_t == rule_end:
+                                        check_status = "班次正確"
                                 
                                 actual_h_str = str(actual_h)
                                 if is_weekend and not is_off and work_h > 0:
@@ -125,7 +122,7 @@ uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
 if uploaded_file:
     if st.button("🚀 啟動衛星連線分析"):
-        result = process_data_v14_2_8(uploaded_file)
+        result = process_data_v14_2_9(uploaded_file)
         if result == "INCOMPATIBLE":
             st.error("❌ 檔案相容性異常。")
         else:
@@ -161,11 +158,8 @@ if uploaded_file:
                             if col_n == '人員':
                                 fmt_dict['font_color'] = c_sets['text']; fmt_dict['bg_color'] = c_sets['bg']
                             elif row['_is_off']:
-                                # --- V14.2.8 更新：休假背景與週末規則同步 ---
-                                if row['_is_weekend']:
-                                    fmt_dict['bg_color'] = '#FFE0B2' # 週末橘色背景
-                                else:
-                                    fmt_dict['bg_color'] = '#FF0000' # 平日休假紅底
+                                # --- V14.2.9 更新：休假一律紅底 ---
+                                fmt_dict['bg_color'] = '#FF0000'
                                 fmt_dict['font_color'] = '#000000'
                             elif col_n == '班次核對':
                                 fmt_dict['bold'] = True
@@ -201,4 +195,4 @@ if uploaded_file:
                             ws_s.write(r_idx + 1, c_idx, val_s, wb.add_format(sum_fmt))
                     ws_s.set_column('A:E', 15)
 
-            st.download_button("📥 下載 V14.2.8 視覺同步版", output_excel.getvalue(), "化石先生報告.xlsx")
+            st.download_button("📥 下載 V14.2.9 終極紅區版", output_excel.getvalue(), "化石先生報告.xlsx")
