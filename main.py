@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from PIL import Image
 
-# V14.5.3 雲端品牌旗艦版：排班確認表分頁排序 + 預設篩選開啟 + 標題名稱同步校準
+# V14.5.4 雲端品牌旗艦版：摘要欄位更名為「累計加班時數」 + 排班確認表分頁排序 + 預設篩選開啟
 st.set_page_config(page_title="化石先生：雲端工時分析系統", layout="wide")
 
 def display_header():
@@ -18,12 +18,12 @@ def display_header():
         except Exception:
             st.error("📷 Logo 遺失")
     with col_title:
-        st.title("化石先生：雲端工時分析系統 (V14.5.3)")
+        st.title("化石先生：雲端工時分析系統 (V14.5.4)")
     st.markdown("---")
 
 display_header()
 
-def process_data_v14_5_3(file):
+def process_data_v14_5_4(file):
     shift_rules = {
         'A': ('09:30', '17:30'), 'B': ('13:00', '21:00'), 'B2': ('14:00', '22:00'),
         'C': ('12:00', '20:30'), 'All': ('09:30', '21:00'), 'All2': ('09:30', '22:00')
@@ -108,7 +108,7 @@ if uploaded_file:
         m_time, e_time = "無法讀取", "無法讀取"
 
     if st.button("🚀 啟動衛星連線分析"):
-        month_dict, shift_rules = process_data_v14_5_3(uploaded_file)
+        month_dict, shift_rules = process_data_v14_5_4(uploaded_file)
         if not month_dict:
             st.error("❌ 檔案相容性異常。")
         else:
@@ -129,11 +129,10 @@ if uploaded_file:
                     for c_idx, val in enumerate(row_vals): ws_shift.write(r_idx + 1, c_idx, val, bold_border_f)
                 ws_shift.set_column(0, 2, 20)
 
-                # --- 2. 準備 排班確認表 數據 ---
+                # --- 2. 排班確認表 ---
                 all_confirm_data = []
                 p_colors = [{'text': '#0000FF', 'bg': '#E1F5FE'}, {'text': '#008000', 'bg': '#E8F5E9'}, {'text': '#800080', 'bg': '#F3E5F5'}, {'text': '#FF8C00', 'bg': '#FFF3E0'}, {'text': '#008080', 'bg': '#E0F2F1'}, {'text': '#A52A2A', 'bg': '#EFEBE9'}, {'text': '#2F4F4F', 'bg': '#ECEFF1'}]
                 
-                # 先執行數據分析循環
                 for m_name, data in month_dict.items():
                     m_num_match = re.search(r'(\d+)', m_name)
                     clean_m = m_num_match.group(1) if m_num_match else m_name
@@ -148,14 +147,10 @@ if uploaded_file:
                 total_confirm_df.rename(columns={'出勤計算': '當天人數', '星期': '平日/假日'}, inplace=True)
                 total_confirm_df = total_confirm_df.reindex(columns=['月份', '日期', '平日/假日', '當天人數', '人員', '排班人數確認', '備註'])
 
-                # --- V14.5.3 更新：排班確認表分頁寫入 (置於班次對照表右邊) ---
                 total_confirm_df.to_excel(writer, index=False, sheet_name='排班確認表', startrow=1)
                 ws_c = writer.sheets['排班確認表']
                 ws_c.freeze_panes(2, 0)
-                # 首行標題更名為「排班確認表」並崁入溯源資訊
                 ws_c.merge_range(0, 0, 0, 6, f"排班確認表  |  原始檔名：{f_name}  |  最後修改時間：{m_time}  |  上次編輯時間：{e_time}", info_f)
-                
-                # 標題行預設篩選開啟
                 ws_c.autofilter(1, 0, len(total_confirm_df)+1, len(total_confirm_df.columns)-1)
                 for c_idx, col in enumerate(total_confirm_df.columns): ws_c.write(1, c_idx, col, head_f)
                 
@@ -178,11 +173,12 @@ if uploaded_file:
                         ws_c.write(r_idx + 2, c_idx, val_c, wb.add_format(c_fmt))
                 ws_c.set_column('A:G', 15); ws_c.set_column('E:E', 40)
 
-                # --- 3. 處理 明細+摘要 頁面 (置於最後) ---
+                # --- 3. 明細+摘要 頁面 ---
                 for m_name, data in month_dict.items():
                     safe_m = str(m_name)[:15] + "_明細+摘要"
+                    # --- V14.5.4 更新：摘要欄位更名為「累計加班時數」 ---
                     summary = data.groupby('人員').agg({'出勤計算': 'sum', '當日工時': 'sum', '休息時間/用餐': 'sum', '加班': 'sum'}).reset_index()
-                    summary.rename(columns={'出勤計算': '總工作天數', '當日工時': '當月工時'}, inplace=True)
+                    summary.rename(columns={'出勤計算': '總工作天數', '當日工時': '當月工時', '加班': '累計加班時數'}, inplace=True)
                     p_color_map = {p: p_colors[i % len(p_colors)] for i, p in enumerate(data['人員'].unique())}
                     
                     cols_d = ['人員', '日期', '星期', '班次', '班次核對', '上班', '下班', '當日工時', '休息時間/用餐', '實際產出工時', '加班', '備註']
@@ -220,13 +216,15 @@ if uploaded_file:
                             v_s = row_s[col_n]
                             s_fmt = {'border': 1, 'num_format': '0.0', 'align': 'left', 'valign': 'vcenter'}
                             if col_n == '人員': s_fmt['font_color'] = c_sets_s['text']; s_fmt['bg_color'] = c_sets_s['bg']
-                            elif col_n == '加班':
+                            elif col_n == '累計加班時數':
                                 if v_s > 20.0: s_fmt['bg_color'] = '#FF0000'; s_fmt['font_color'] = '#FFFFFF'; s_fmt['bold'] = True
                                 else: s_fmt['font_color'] = '#FF0000'
                             ws.write(r_idx + 2, start_col_sum + c_idx, v_s, wb.add_format(s_fmt))
                     for i, col in enumerate(cols_d):
                         w = 40 if col == '備註' else max(data[col].astype(str).map(len).max(), len(col)) + 6
                         ws.set_column(i, i, w)
-                    for i, col in enumerate(summary.columns): ws.set_column(start_col_sum + i, start_col_sum + i, 15)
+                    for i, col in enumerate(summary.columns): 
+                        w = max(summary[col].astype(str).map(len).max(), len(col)) + 6
+                        ws.set_column(start_col_sum + i, start_col_sum + i, w)
 
-            st.download_button(f"📥 下載 V14.5.3 確認排序版", output_excel.getvalue(), "化石先生報告.xlsx")
+            st.download_button(f"📥 下載 V14.5.4 術語修正版", output_excel.getvalue(), "化石先生報告.xlsx")
