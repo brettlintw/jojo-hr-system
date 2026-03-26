@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from PIL import Image
 
-# V14.5.4 雲端品牌旗艦版：摘要欄位更名為「累計加班時數」 + 排班確認表分頁排序 + 預設篩選開啟
+# V14.5.5 雲端品牌旗艦版：首行新增排班規則聲明 + 摘要欄位「累計加班時數」 + 預設篩選開啟
 st.set_page_config(page_title="化石先生：雲端工時分析系統", layout="wide")
 
 def display_header():
@@ -18,12 +18,12 @@ def display_header():
         except Exception:
             st.error("📷 Logo 遺失")
     with col_title:
-        st.title("化石先生：雲端工時分析系統 (V14.5.4)")
+        st.title("化石先生：雲端工時分析系統 (V14.5.5)")
     st.markdown("---")
 
 display_header()
 
-def process_data_v14_5_4(file):
+def process_data_v14_5_5(file):
     shift_rules = {
         'A': ('09:30', '17:30'), 'B': ('13:00', '21:00'), 'B2': ('14:00', '22:00'),
         'C': ('12:00', '20:30'), 'All': ('09:30', '21:00'), 'All2': ('09:30', '22:00')
@@ -108,7 +108,7 @@ if uploaded_file:
         m_time, e_time = "無法讀取", "無法讀取"
 
     if st.button("🚀 啟動衛星連線分析"):
-        month_dict, shift_rules = process_data_v14_5_4(uploaded_file)
+        month_dict, shift_rules = process_data_v14_5_5(uploaded_file)
         if not month_dict:
             st.error("❌ 檔案相容性異常。")
         else:
@@ -150,7 +150,10 @@ if uploaded_file:
                 total_confirm_df.to_excel(writer, index=False, sheet_name='排班確認表', startrow=1)
                 ws_c = writer.sheets['排班確認表']
                 ws_c.freeze_panes(2, 0)
-                ws_c.merge_range(0, 0, 0, 6, f"排班確認表  |  原始檔名：{f_name}  |  最後修改時間：{m_time}  |  上次編輯時間：{e_time}", info_f)
+                # --- V14.5.5 更新：首行崁入排班規則聲明 ---
+                rule_text = "排班表規則:平日2-3人；假日3~4人；排班規則早1晚2(2A2B) 或1A2B1C"
+                ws_c.merge_range(0, 0, 0, 6, f"{rule_text}  |  檔名：{f_name}  |  修改時間：{m_time}", info_f)
+                
                 ws_c.autofilter(1, 0, len(total_confirm_df)+1, len(total_confirm_df.columns)-1)
                 for c_idx, col in enumerate(total_confirm_df.columns): ws_c.write(1, c_idx, col, head_f)
                 
@@ -176,7 +179,6 @@ if uploaded_file:
                 # --- 3. 明細+摘要 頁面 ---
                 for m_name, data in month_dict.items():
                     safe_m = str(m_name)[:15] + "_明細+摘要"
-                    # --- V14.5.4 更新：摘要欄位更名為「累計加班時數」 ---
                     summary = data.groupby('人員').agg({'出勤計算': 'sum', '當日工時': 'sum', '休息時間/用餐': 'sum', '加班': 'sum'}).reset_index()
                     summary.rename(columns={'出勤計算': '總工作天數', '當日工時': '當月工時', '加班': '累計加班時數'}, inplace=True)
                     p_color_map = {p: p_colors[i % len(p_colors)] for i, p in enumerate(data['人員'].unique())}
@@ -187,7 +189,7 @@ if uploaded_file:
                     data[cols_d].to_excel(writer, index=False, sheet_name=safe_m, startrow=1)
                     ws = writer.sheets[safe_m]
                     ws.freeze_panes(2, 0)
-                    ws.merge_range(0, 0, 0, start_col_sum + 4, f"原始檔名：{f_name}  |  最後修改時間：{m_time}  |  上次編輯時間：{e_time}", info_f)
+                    ws.merge_range(0, 0, 0, start_col_sum + 4, f"原始檔名：{f_name}  |  修改時間：{m_time}", info_f)
                     ws.autofilter(1, 0, len(data)+1, len(cols_d)-1) 
                     
                     for c_idx, col_n in enumerate(cols_d): ws.write(1, c_idx, col_n, head_f)
@@ -227,4 +229,4 @@ if uploaded_file:
                         w = max(summary[col].astype(str).map(len).max(), len(col)) + 6
                         ws.set_column(start_col_sum + i, start_col_sum + i, w)
 
-            st.download_button(f"📥 下載 V14.5.4 術語修正版", output_excel.getvalue(), "化石先生報告.xlsx")
+            st.download_button(f"📥 下載 V14.5.5 規則崁入版", output_excel.getvalue(), "化石先生報告.xlsx")
