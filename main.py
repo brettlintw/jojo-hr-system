@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from PIL import Image
 
-# V14.5.6 雲端品牌旗艦版：明細與摘要間距縮減至1欄 + 排班規則聲明崁入 + 首兩行凍結
+# V14.5.7 雲端品牌旗艦版：動態檔名自動生成 + 明細摘要緊縮間距 + 規則聲明首行崁入
 st.set_page_config(page_title="化石先生：雲端工時分析系統", layout="wide")
 
 def display_header():
@@ -18,12 +18,12 @@ def display_header():
         except Exception:
             st.error("📷 Logo 遺失")
     with col_title:
-        st.title("化石先生：雲端工時分析系統 (V14.5.6)")
+        st.title("化石先生：雲端工時分析系統 (V14.5.7)")
     st.markdown("---")
 
 display_header()
 
-def process_data_v14_5_6(file):
+def process_data_v14_5_7(file):
     shift_rules = {
         'A': ('09:30', '17:30'), 'B': ('13:00', '21:00'), 'B2': ('14:00', '22:00'),
         'C': ('12:00', '20:30'), 'All': ('09:30', '21:00'), 'All2': ('09:30', '22:00')
@@ -89,7 +89,11 @@ def process_data_v14_5_6(file):
 uploaded_file = st.file_uploader("導入原始班表 Excel", type=["xlsx"])
 
 if uploaded_file:
-    f_name = uploaded_file.name
+    f_name_raw = uploaded_file.name
+    f_name_no_ext = f_name_raw.rsplit('.', 1)[0]
+    date_str = datetime.now().strftime("%Y%m%d")
+    final_filename = f"化石先生-{f_name_no_ext}-{date_str}.xlsx"
+
     try:
         uploaded_file.seek(0)
         wb_meta = openpyxl.load_workbook(uploaded_file, read_only=True)
@@ -97,7 +101,7 @@ if uploaded_file:
         m_time = meta.modified.strftime("%Y/%m/%d %H:%M:%S") if meta.modified else "無法讀取"
         st.markdown(f"""
         <div style="background-color: #F0F2F6; padding: 15px; border-radius: 10px; border-left: 5px solid #0000FF; margin-bottom: 20px;">
-            <p style="color: #0000FF; font-size: 1.1em; margin-bottom: 5px;"><b>原始檔名：</b>{f_name}</p>
+            <p style="color: #0000FF; font-size: 1.1em; margin-bottom: 5px;"><b>原始檔名：</b>{f_name_raw}</p>
             <p style="color: #0000FF; font-size: 1.1em; margin-bottom: 0;"><b>最後修改時間：</b>{m_time}</p>
         </div>
         """, unsafe_allow_html=True)
@@ -105,7 +109,7 @@ if uploaded_file:
         m_time = "無法讀取"
 
     if st.button("🚀 啟動衛星連線分析"):
-        month_dict, shift_rules = process_data_v14_5_6(uploaded_file)
+        month_dict, shift_rules = process_data_v14_5_7(uploaded_file)
         if not month_dict:
             st.error("❌ 檔案相容性異常。")
         else:
@@ -117,7 +121,7 @@ if uploaded_file:
                 yellow_head_f = wb.add_format({'bold': 1, 'font_color': 'blue', 'bg_color': 'yellow', 'border': 2, 'align': 'left'})
                 bold_border_f = wb.add_format({'border': 2, 'align': 'left'})
 
-                # --- 1. 班次對照表 ---
+                # 1. 班次對照表
                 shift_df = pd.DataFrame([{'班次': k, '上班': v[0], '下班': v[1]} for k, v in shift_rules.items()])
                 shift_df.to_excel(writer, index=False, sheet_name='班次對照表')
                 ws_shift = writer.sheets['班次對照表']
@@ -126,7 +130,7 @@ if uploaded_file:
                     for c_idx, val in enumerate(row_vals): ws_shift.write(r_idx + 1, c_idx, val, bold_border_f)
                 ws_shift.set_column(0, 2, 20)
 
-                # --- 2. 排班確認表 ---
+                # 2. 排班確認表
                 all_confirm_data = []
                 p_colors = [{'text': '#0000FF', 'bg': '#E1F5FE'}, {'text': '#008000', 'bg': '#E8F5E9'}, {'text': '#800080', 'bg': '#F3E5F5'}, {'text': '#FF8C00', 'bg': '#FFF3E0'}, {'text': '#008080', 'bg': '#E0F2F1'}, {'text': '#A52A2A', 'bg': '#EFEBE9'}, {'text': '#2F4F4F', 'bg': '#ECEFF1'}]
                 
@@ -147,8 +151,8 @@ if uploaded_file:
                 total_confirm_df.to_excel(writer, index=False, sheet_name='排班確認表', startrow=1)
                 ws_c = writer.sheets['排班確認表']
                 ws_c.freeze_panes(2, 0)
-                rule_text = "排班表規則:平日2-3人；假日3~4人；排班規則早1晚2(2A2B) 或1A2B1C"
-                ws_c.merge_range(0, 0, 0, 6, f"{rule_text}  |  檔名：{f_name}  |  修改時間：{m_time}", info_f)
+                rule_t = "排班表規則:平日2-3人；假日3~4人；排班規則早1晚2(2A2B) 或1A2B1C"
+                ws_c.merge_range(0, 0, 0, 6, f"{rule_t}  |  原始檔名：{f_name_raw}  |  修改時間：{m_time}", info_f)
                 ws_c.autofilter(1, 0, len(total_confirm_df)+1, len(total_confirm_df.columns)-1)
                 for c_idx, col in enumerate(total_confirm_df.columns): ws_c.write(1, c_idx, col, head_f)
                 
@@ -171,7 +175,7 @@ if uploaded_file:
                         ws_c.write(r_idx + 2, c_idx, val_c, wb.add_format(c_fmt))
                 ws_c.set_column('A:G', 15); ws_c.set_column('E:E', 40)
 
-                # --- 3. 明細+摘要 頁面 ---
+                # 3. 明細+摘要 頁面
                 for m_name, data in month_dict.items():
                     safe_m = str(m_name)[:15] + "_明細+摘要"
                     summary = data.groupby('人員').agg({'出勤計算': 'sum', '當日工時': 'sum', '休息時間/用餐': 'sum', '加班': 'sum'}).reset_index()
@@ -179,14 +183,12 @@ if uploaded_file:
                     p_color_map = {p: p_colors[i % len(p_colors)] for i, p in enumerate(data['人員'].unique())}
                     
                     cols_d = ['人員', '日期', '星期', '班次', '班次核對', '上班', '下班', '當日工時', '休息時間/用餐', '實際產出工時', '加班', '備註']
-                    
-                    # --- V14.5.6 更新：將摘要間距縮減至 1 欄 ---
                     start_col_sum = len(cols_d) + 1 
                     
                     data[cols_d].to_excel(writer, index=False, sheet_name=safe_m, startrow=1)
                     ws = writer.sheets[safe_m]
                     ws.freeze_panes(2, 0)
-                    ws.merge_range(0, 0, 0, start_col_sum + 4, f"原始檔名：{f_name}  |  修改時間：{m_time}", info_f)
+                    ws.merge_range(0, 0, 0, start_col_sum + 4, f"原始檔名：{f_name_raw}  |  修改時間：{m_time}", info_f)
                     ws.autofilter(1, 0, len(data)+1, len(cols_d)-1) 
                     
                     for c_idx, col_n in enumerate(cols_d): ws.write(1, c_idx, col_n, head_f)
@@ -226,4 +228,4 @@ if uploaded_file:
                         w = max(summary[col].astype(str).map(len).max(), len(col)) + 6
                         ws.set_column(start_col_sum + i, start_col_sum + i, w)
 
-            st.download_button(f"📥 下載 V14.5.6 間距緊縮版", output_excel.getvalue(), "化石先生報告.xlsx")
+            st.download_button(f"📥 下載系統報告", output_excel.getvalue(), final_filename)
