@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from PIL import Image
 
-# V14.5.2 雲端品牌旗艦版：月份欄位純數字化 + 全月份整合 + 溯源資訊首行崁入
+# V14.5.3 雲端品牌旗艦版：排班確認表分頁排序 + 預設篩選開啟 + 標題名稱同步校準
 st.set_page_config(page_title="化石先生：雲端工時分析系統", layout="wide")
 
 def display_header():
@@ -18,12 +18,12 @@ def display_header():
         except Exception:
             st.error("📷 Logo 遺失")
     with col_title:
-        st.title("化石先生：雲端工時分析系統 (V14.5.2)")
+        st.title("化石先生：雲端工時分析系統 (V14.5.3)")
     st.markdown("---")
 
 display_header()
 
-def process_data_v14_5_2(file):
+def process_data_v14_5_3(file):
     shift_rules = {
         'A': ('09:30', '17:30'), 'B': ('13:00', '21:00'), 'B2': ('14:00', '22:00'),
         'C': ('12:00', '20:30'), 'All': ('09:30', '21:00'), 'All2': ('09:30', '22:00')
@@ -108,7 +108,7 @@ if uploaded_file:
         m_time, e_time = "無法讀取", "無法讀取"
 
     if st.button("🚀 啟動衛星連線分析"):
-        month_dict, shift_rules = process_data_v14_5_2(uploaded_file)
+        month_dict, shift_rules = process_data_v14_5_3(uploaded_file)
         if not month_dict:
             st.error("❌ 檔案相容性異常。")
         else:
@@ -120,7 +120,7 @@ if uploaded_file:
                 yellow_head_f = wb.add_format({'bold': 1, 'font_color': 'blue', 'bg_color': 'yellow', 'border': 2, 'align': 'left'})
                 bold_border_f = wb.add_format({'border': 2, 'align': 'left'})
 
-                # 1. 班次對照表
+                # --- 1. 班次對照表 ---
                 shift_df = pd.DataFrame([{'班次': k, '上班': v[0], '下班': v[1]} for k, v in shift_rules.items()])
                 shift_df.to_excel(writer, index=False, sheet_name='班次對照表')
                 ws_shift = writer.sheets['班次對照表']
@@ -129,16 +129,58 @@ if uploaded_file:
                     for c_idx, val in enumerate(row_vals): ws_shift.write(r_idx + 1, c_idx, val, bold_border_f)
                 ws_shift.set_column(0, 2, 20)
 
-                p_colors = [{'text': '#0000FF', 'bg': '#E1F5FE'}, {'text': '#008000', 'bg': '#E8F5E9'}, {'text': '#800080', 'bg': '#F3E5F5'}, {'text': '#FF8C00', 'bg': '#FFF3E0'}, {'text': '#008080', 'bg': '#E0F2F1'}, {'text': '#A52A2A', 'bg': '#EFEBE9'}, {'text': '#2F4F4F', 'bg': '#ECEFF1'}]
+                # --- 2. 準備 排班確認表 數據 ---
                 all_confirm_data = []
+                p_colors = [{'text': '#0000FF', 'bg': '#E1F5FE'}, {'text': '#008000', 'bg': '#E8F5E9'}, {'text': '#800080', 'bg': '#F3E5F5'}, {'text': '#FF8C00', 'bg': '#FFF3E0'}, {'text': '#008080', 'bg': '#E0F2F1'}, {'text': '#A52A2A', 'bg': '#EFEBE9'}, {'text': '#2F4F4F', 'bg': '#ECEFF1'}]
+                
+                # 先執行數據分析循環
+                for m_name, data in month_dict.items():
+                    m_num_match = re.search(r'(\d+)', m_name)
+                    clean_m = m_num_match.group(1) if m_num_match else m_name
+                    active_duty = data[~data['_is_off']].copy()
+                    c_df = active_duty.groupby('日期').agg({'星期': 'first', '人員': lambda x: ",".join(x), '出勤計算': 'sum'}).reset_index()
+                    c_df['月份'] = clean_m
+                    c_df['排班人數確認'] = c_df.apply(lambda r: "正常" if (r['星期'] in ['週六', '週日'] and 3 <= r['出勤計算'] <= 4) or (r['星期'] not in ['週六', '週日'] and 2 <= r['出勤計算'] <= 3) else "異常", axis=1)
+                    c_df['備註'] = ""
+                    all_confirm_data.append(c_df)
 
-                for month_name, data in month_dict.items():
-                    # --- V14.5.2 更新：從分頁名稱擷取純數字月份 ---
-                    month_num_match = re.search(r'(\d+)', month_name)
-                    clean_month = month_num_match.group(1) if month_num_match else month_name
-                    
-                    safe_m = str(month_name)[:15]
-                    sheet_main = f"{safe_m}_明細+摘要"
+                total_confirm_df = pd.concat(all_confirm_data, ignore_index=True)
+                total_confirm_df.rename(columns={'出勤計算': '當天人數', '星期': '平日/假日'}, inplace=True)
+                total_confirm_df = total_confirm_df.reindex(columns=['月份', '日期', '平日/假日', '當天人數', '人員', '排班人數確認', '備註'])
+
+                # --- V14.5.3 更新：排班確認表分頁寫入 (置於班次對照表右邊) ---
+                total_confirm_df.to_excel(writer, index=False, sheet_name='排班確認表', startrow=1)
+                ws_c = writer.sheets['排班確認表']
+                ws_c.freeze_panes(2, 0)
+                # 首行標題更名為「排班確認表」並崁入溯源資訊
+                ws_c.merge_range(0, 0, 0, 6, f"排班確認表  |  原始檔名：{f_name}  |  最後修改時間：{m_time}  |  上次編輯時間：{e_time}", info_f)
+                
+                # 標題行預設篩選開啟
+                ws_c.autofilter(1, 0, len(total_confirm_df)+1, len(total_confirm_df.columns)-1)
+                for c_idx, col in enumerate(total_confirm_df.columns): ws_c.write(1, c_idx, col, head_f)
+                
+                for r_idx, row_c in total_confirm_df.iterrows():
+                    is_we = row_c['平日/假日'] in ['週六', '週日']
+                    is_m_end = (r_idx < len(total_confirm_df)-1) and (total_confirm_df.iloc[r_idx+1]['月份'] != row_c['月份'])
+                    for c_idx, col_n in enumerate(total_confirm_df.columns):
+                        val_c = row_c[col_n]
+                        c_fmt = {'border': 1, 'align': 'left', 'valign': 'vcenter'}
+                        if is_m_end: c_fmt['bottom'] = 5
+                        if col_n == '平日/假日':
+                            c_fmt['font_color'] = '#FF0000' if is_we else '#008000'
+                            val_c = row_c['平日/假日'] if is_we else "平日"
+                        elif col_n == '當天人數':
+                            lim = (3, 4) if is_we else (2, 3)
+                            c_fmt['font_color'] = '#008000' if lim[0] <= val_c <= lim[1] else '#FF0000'
+                        elif col_n == '排班人數確認':
+                            c_fmt['font_color'] = '#008000' if val_c == "正常" else '#FF0000'
+                            c_fmt['bold'] = True
+                        ws_c.write(r_idx + 2, c_idx, val_c, wb.add_format(c_fmt))
+                ws_c.set_column('A:G', 15); ws_c.set_column('E:E', 40)
+
+                # --- 3. 處理 明細+摘要 頁面 (置於最後) ---
+                for m_name, data in month_dict.items():
+                    safe_m = str(m_name)[:15] + "_明細+摘要"
                     summary = data.groupby('人員').agg({'出勤計算': 'sum', '當日工時': 'sum', '休息時間/用餐': 'sum', '加班': 'sum'}).reset_index()
                     summary.rename(columns={'出勤計算': '總工作天數', '當日工時': '當月工時'}, inplace=True)
                     p_color_map = {p: p_colors[i % len(p_colors)] for i, p in enumerate(data['人員'].unique())}
@@ -146,8 +188,8 @@ if uploaded_file:
                     cols_d = ['人員', '日期', '星期', '班次', '班次核對', '上班', '下班', '當日工時', '休息時間/用餐', '實際產出工時', '加班', '備註']
                     start_col_sum = len(cols_d) + 2
                     
-                    data[cols_d].to_excel(writer, index=False, sheet_name=sheet_main, startrow=1)
-                    ws = writer.sheets[sheet_main]
+                    data[cols_d].to_excel(writer, index=False, sheet_name=safe_m, startrow=1)
+                    ws = writer.sheets[safe_m]
                     ws.freeze_panes(2, 0)
                     ws.merge_range(0, 0, 0, start_col_sum + 4, f"原始檔名：{f_name}  |  最後修改時間：{m_time}  |  上次編輯時間：{e_time}", info_f)
                     ws.autofilter(1, 0, len(data)+1, len(cols_d)-1) 
@@ -182,45 +224,9 @@ if uploaded_file:
                                 if v_s > 20.0: s_fmt['bg_color'] = '#FF0000'; s_fmt['font_color'] = '#FFFFFF'; s_fmt['bold'] = True
                                 else: s_fmt['font_color'] = '#FF0000'
                             ws.write(r_idx + 2, start_col_sum + c_idx, v_s, wb.add_format(s_fmt))
+                    for i, col in enumerate(cols_d):
+                        w = 40 if col == '備註' else max(data[col].astype(str).map(len).max(), len(col)) + 6
+                        ws.set_column(i, i, w)
+                    for i, col in enumerate(summary.columns): ws.set_column(start_col_sum + i, start_col_sum + i, 15)
 
-                    # 3. 準備 排班確定表
-                    active_duty = data[~data['_is_off']].copy()
-                    confirm_df = active_duty.groupby('日期').agg({'星期': 'first', '人員': lambda x: ",".join(x), '出勤計算': 'sum'}).reset_index()
-                    confirm_df['月份'] = clean_month # 填入純數字月份
-                    confirm_df['排班人數確認'] = confirm_df.apply(lambda r: "正常" if (r['星期'] in ['週六', '週日'] and 3 <= r['出勤計算'] <= 4) or (r['星期'] not in ['週六', '週日'] and 2 <= r['出勤計算'] <= 3) else "異常", axis=1)
-                    confirm_df['備註'] = ""
-                    all_confirm_data.append(confirm_df)
-
-                # 4. 寫入合併 排班確定表
-                total_confirm_df = pd.concat(all_confirm_data, ignore_index=True)
-                total_confirm_df.rename(columns={'出勤計算': '當天人數', '星期': '平日/假日'}, inplace=True)
-                total_confirm_df = total_confirm_df.reindex(columns=['月份', '日期', '平日/假日', '當天人數', '人員', '排班人數確認', '備註'])
-                
-                total_confirm_df.to_excel(writer, index=False, sheet_name='排班確定表', startrow=1)
-                ws_c = writer.sheets['排班確定表']
-                ws_c.freeze_panes(2, 0)
-                ws_c.merge_range(0, 0, 0, 6, f"人力密度監控儀表板  |  原始檔名：{f_name}  |  最後修改時間：{m_time}  |  上次編輯時間：{e_time}", info_f)
-                for c_idx, col in enumerate(total_confirm_df.columns): ws_c.write(1, c_idx, col, head_f)
-                
-                for r_idx, row_c in total_confirm_df.iterrows():
-                    is_we = row_c['平日/假日'] in ['週六', '週日']
-                    is_m_end = (r_idx < len(total_confirm_df)-1) and (total_confirm_df.iloc[r_idx+1]['月份'] != row_c['月份'])
-                    for c_idx, col_n in enumerate(total_confirm_df.columns):
-                        val_c = row_c[col_n]
-                        c_fmt = {'border': 1, 'align': 'left', 'valign': 'vcenter'}
-                        if is_m_end: c_fmt['bottom'] = 5
-                        if col_n == '平日/假日':
-                            c_fmt['font_color'] = '#FF0000' if is_we else '#008000'
-                            val_c = row_c['平日/假日'] if is_we else "平日"
-                        elif col_n == '當天人數':
-                            lim = (3, 4) if is_we else (2, 3)
-                            c_fmt['font_color'] = '#008000' if lim[0] <= val_c <= lim[1] else '#FF0000'
-                        elif col_n == '排班人數確認':
-                            c_fmt['font_color'] = '#008000' if val_c == "正常" else '#FF0000'
-                            c_fmt['bold'] = True
-                        ws_c.write(r_idx + 2, c_idx, val_c, wb.add_format(c_fmt))
-                
-                ws_c.set_column('A:G', 15)
-                ws_c.set_column('E:E', 40)
-
-            st.download_button(f"📥 下載 V14.5.2 月份精煉版", output_excel.getvalue(), "化石先生報告.xlsx")
+            st.download_button(f"📥 下載 V14.5.3 確認排序版", output_excel.getvalue(), "化石先生報告.xlsx")
